@@ -109,6 +109,11 @@ PAYMENT_CARD_HOLDER: str = os.getenv("PAYMENT_CARD_HOLDER", "IVAN PETRENKO")
 # на склад (иначе неоплаченные заказы навсегда заморозили бы товар).
 ORDER_PAYMENT_TIMEOUT_HOURS: int = int(os.getenv("ORDER_PAYMENT_TIMEOUT_HOURS", "24"))
 
+# Через сколько часов простоя напомнить о брошенной корзине. Напоминание уходит
+# РОВНО одно на корзину (см. services/jobs.py): второе — это уже спам, от
+# которого клиент блокирует бота.
+CART_REMINDER_HOURS: int = int(os.getenv("CART_REMINDER_HOURS", "6"))
+
 # --- Пути ---
 # По умолчанию база лежит рядом с кодом — так удобно на своём ПК.
 # На хостинге так нельзя: при каждом обновлении бота папка с кодом создаётся

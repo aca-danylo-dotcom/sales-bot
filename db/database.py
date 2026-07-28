@@ -88,10 +88,13 @@ CREATE INDEX IF NOT EXISTS idx_clients_ig ON clients(ig_user_id);
 -- создании заказа. Историю покупок хранят orders/order_items.
 
 CREATE TABLE IF NOT EXISTS carts (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    client_id  INTEGER NOT NULL UNIQUE REFERENCES clients(telegram_id) ON DELETE CASCADE,
-    channel    TEXT    NOT NULL DEFAULT 'telegram',   -- откуда пришёл клиент
-    updated_at TEXT    NOT NULL
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id   INTEGER NOT NULL UNIQUE REFERENCES clients(telegram_id) ON DELETE CASCADE,
+    channel     TEXT    NOT NULL DEFAULT 'telegram',  -- откуда пришёл клиент
+    updated_at  TEXT    NOT NULL,
+    reminded_at TEXT                                  -- когда напомнили о брошенной
+                                                      -- корзине; сбрасывается, когда
+                                                      -- корзина опустела (заказ/очистка)
 );
 
 CREATE TABLE IF NOT EXISTS cart_items (
@@ -178,6 +181,25 @@ CREATE TABLE IF NOT EXISTS users (
 """
 
 
+# Колонки, добавленные к схеме уже после того, как бот где-то запустился.
+# CREATE TABLE IF NOT EXISTS существующую таблицу молча пропускает, поэтому на
+# рабочей базе новое поле появится только через ALTER TABLE. Формат записи:
+# (таблица, колонка, объявление). Колонка обязана быть необязательной — данные
+# в старых строках заполнить нечем.
+_ADDED_COLUMNS: list[tuple[str, str, str]] = [
+    ("carts", "reminded_at", "TEXT"),
+]
+
+
+async def _add_missing_columns(conn: aiosqlite.Connection) -> None:
+    """Дописывает колонки из _ADDED_COLUMNS в уже существующие таблицы."""
+    for table, column, declaration in _ADDED_COLUMNS:
+        cursor = await conn.execute(f"PRAGMA table_info({table})")
+        existing = {row["name"] for row in await cursor.fetchall()}
+        if column not in existing:
+            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+
 def _lower_uni(value: str | None) -> str | None:
     """Нижний регистр средствами Python — для SQL-функции lower_uni().
 
@@ -242,7 +264,7 @@ def _prepare_storage() -> None:
 
 
 async def init_db() -> None:
-    """Создаёт таблицы, если их ещё нет. Идемпотентна."""
+    """Создаёт таблицы и дописывает недостающие колонки. Идемпотентна."""
     _prepare_storage()
     async with get_connection() as conn:
         # Журнал WAL: чтение перестаёт блокировать запись, и наоборот. Настройка
@@ -253,4 +275,5 @@ async def init_db() -> None:
         if config.DB_ON_VOLUME:
             await conn.execute("PRAGMA journal_mode = WAL")
         await conn.executescript(_SCHEMA)
+        await _add_missing_columns(conn)
         await conn.commit()

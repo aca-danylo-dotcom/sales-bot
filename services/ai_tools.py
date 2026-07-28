@@ -62,13 +62,19 @@ def _product_brief(product: dict, *, with_description: bool = False) -> dict:
     return brief
 
 
+def _flat(value: str | None) -> str:
+    """Размер в сравнимом виде: без регистра и без пробелов внутри."""
+    return (value or "").lower().replace(" ", "")
+
+
 def _matches(variant: dict, size: str | None, color: str | None) -> bool:
     """Подходит ли вариант под запрошенные размер и цвет.
 
-    Размер сравниваем целиком (42 — это не 42.5), цвет — вхождением: клиент пишет
-    «чёрные», а в базе лежит «чёрный».
+    Размер сравниваем целиком (42 — это не 42.5), но без пробелов: «12oz» и
+    «12 oz» — один и тот же размер. Цвет — вхождением: клиент пишет «чёрные», а
+    в базе лежит «чёрный».
     """
-    if size and (variant.get("size") or "").strip().lower() != size.strip().lower():
+    if size and _flat(variant.get("size")) != _flat(size):
         return False
     if color and color.strip().lower() not in (variant.get("color") or "").strip().lower():
         return False
@@ -95,7 +101,11 @@ TOOLS: list[dict] = [
                 },
                 "category": {
                     "type": "string",
-                    "description": "Категория, если клиент её назвал: одежда, обувь, экипировка",
+                    "description": (
+                        "Только если ты уже видел эту категорию в каталоге — "
+                        "точно так, как она там называется. Не угадывай: "
+                        "выдуманная категория сузит поиск и товар не найдётся."
+                    ),
                 },
                 "size": {"type": "string", "description": "Размер, если клиент его назвал"},
                 "color": {"type": "string", "description": "Цвет, если клиент его назвал"},
@@ -251,6 +261,16 @@ def build_executor(ctx: ClientContext):
             ctx.show(product["id"])
 
         result = {"products": [_product_brief(p) for p in products]}
+        size, color = (args.get("size") or "").strip(), (args.get("color") or "").strip()
+        if products and (size or color) and not any(
+            _matches(v, size or None, color or None) and v.get("stock", 0) > 0
+            for p in products for v in p.get("variants", [])
+        ):
+            # Поиск ослабил фильтр, чтобы показать товар вместо пустоты. Без этой
+            # оговорки модель решит, что раз товар нашёлся — нужный размер есть.
+            result["note"] = ("Товары похожие, но запрошенного размера или цвета в "
+                              "наличии нет. Скажи об этом прямо и предложи то, "
+                              "что реально есть в in_stock.")
         if not products:
             # Пустой результат — самый рискованный момент: без подсказки модель
             # склонна «вспомнить» товар. Отдаём ей то, что есть на витрине,
@@ -258,7 +278,10 @@ def build_executor(ctx: ClientContext):
             result["found"] = 0
             result["available_categories"] = await queries.get_categories()
             result["note"] = ("Ничего не найдено. Такого товара в каталоге нет — "
-                              "скажи об этом честно и предложи то, что есть.")
+                              "скажи об этом честно. Называть можно только "
+                              "категории из available_categories и спросить, что "
+                              "искать в них: конкретные товары не выдумывай, "
+                              "пока не увидел их в выдаче поиска.")
         return _dump(result)
 
     async def _details(product_id) -> str:

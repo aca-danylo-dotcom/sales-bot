@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable
 
 import config
@@ -210,31 +211,78 @@ async def count_products(*, category: str | None = None, active_only: bool = Fal
         return (await cursor.fetchone())["cnt"]
 
 
-async def search_products(
-    query: str | None = None,
-    *,
-    category: str | None = None,
-    size: str | None = None,
-    color: str | None = None,
-    in_stock_only: bool = True,
-    limit: int = 10,
-) -> list[dict]:
-    """Поиск по каталогу — этим пользуется ИИ-консультант.
+# Слова, которые клиент пишет для связки, а не для поиска. Если их не выбросить,
+# запрос «что есть для бокса» ищет товар со словом «что» в названии и не находит
+# ничего — а бот на пустой результат честно отвечает «такого у нас нет».
+_STOP_WORDS = frozenset({
+    "для", "или", "что", "это", "как", "мне", "меня", "себе", "тут", "там",
+    "нужен", "нужна", "нужно", "нужны", "хочу", "куплю", "купить", "ищу",
+    "есть", "цена", "цену", "стоит", "сколько", "штук", "пару", "под", "без",
+    "при", "про", "все", "весь", "вся", "чем", "чём", "размер", "размера",
+    "размеры", "цвет", "цвета", "модель", "товар", "подскажите", "посоветуйте",
+})
 
-    Скрытые товары не возвращаются никогда: если продавец убрал товар с витрины,
-    бот не должен его предлагать. in_stock_only=True отсекает товары, у которых
-    не осталось ни одного варианта в наличии (с учётом фильтров размера/цвета).
+
+def _stem(word: str) -> str:
+    """Грубая основа слова: отрезаем окончание, чтобы падежи совпадали.
+
+    Морфологии в SQLite нет, а клиент пишет «нужны перчатки» и «что к перчаткам»
+    — совпасть эти формы должны с одним и тем же товаром. Режем щедро: лишний
+    товар в выдаче модель отбросит сама, а вот пустая выдача превращается в
+    «у нас этого нет» и теряет покупателя.
     """
+    if len(word) >= 7:
+        return word[:-3]
+    if len(word) >= 5:
+        return word[:-2]
+    if len(word) >= 4:
+        return word[:-1]
+    return word
+
+
+def _search_terms(query: str) -> list[str]:
+    """Разбирает фразу клиента на основы слов, по которым имеет смысл искать."""
+    terms: list[str] = []
+    for raw in re.split(r"[^\w]+", query.lower(), flags=re.UNICODE):
+        if not raw or raw in _STOP_WORDS:
+            continue
+        stem = _stem(raw)
+        if len(stem) >= 3 and stem not in terms:
+            terms.append(stem)
+    return terms
+
+
+# Одно слово запроса ищется по всему, чем товар себя описывает, включая размеры и
+# цвета вариантов: «перчатки Start 12 oz чёрные» — это название, название, размер
+# и цвет одной строкой, и ни по одному полю отдельно такой запрос не находится.
+_TERM_CLAUSE = (
+    "(lower_uni(p.title) LIKE ? OR lower_uni(p.description) LIKE ? "
+    "OR lower_uni(p.category) LIKE ? OR EXISTS (SELECT 1 FROM product_variants tv "
+    "WHERE tv.product_id = p.id "
+    "AND (lower_uni(tv.size) LIKE ? OR lower_uni(tv.color) LIKE ?)))"
+)
+
+
+async def _search_attempt(
+    terms: list[str],
+    join: str,
+    *,
+    category: str | None,
+    size: str | None,
+    color: str | None,
+    in_stock_only: bool,
+    limit: int,
+) -> list[dict]:
+    """Один заход поиска с готовыми условиями. Пустой список — ничего не подошло."""
     where = ["p.is_active = 1"]
     params: list[Any] = []
 
     # lower_uni() — своя функция вместо LIKE «как есть»: встроенный LIKE не
     # приводит регистр кириллицы, и запрос «перчатки» не нашёл бы «Перчатки».
-    if query:
-        where.append("(lower_uni(p.title) LIKE ? OR lower_uni(p.description) LIKE ? "
-                     "OR lower_uni(p.category) LIKE ?)")
-        like = f"%{query.lower()}%"
-        params += [like, like, like]
+    if terms:
+        where.append("(" + f" {join} ".join(_TERM_CLAUSE for _ in terms) + ")")
+        for term in terms:
+            params += [f"%{term}%"] * 5
     if category:
         where.append("lower_uni(p.category) LIKE ?")
         params.append(f"%{category.lower()}%")
@@ -245,8 +293,10 @@ async def search_products(
     variant_conditions = ["v.product_id = p.id"]
     variant_params: list[Any] = []
     if size:
-        variant_conditions.append("lower_uni(v.size) = ?")
-        variant_params.append(size.lower().strip())
+        # Пробелы убираем с обеих сторон: «12oz» и «12 oz» — один размер, а вот
+        # вхождением сравнивать нельзя (42 не должен совпасть с 42.5 и 142).
+        variant_conditions.append("replace(lower_uni(v.size), ' ', '') = ?")
+        variant_params.append(size.lower().replace(" ", ""))
     if color:
         variant_conditions.append("lower_uni(v.color) LIKE ?")
         variant_params.append(f"%{color.lower().strip()}%")
@@ -256,18 +306,27 @@ async def search_products(
     variant_where = " AND ".join(variant_conditions)
     where.append(f"EXISTS (SELECT 1 FROM product_variants v WHERE {variant_where})")
 
+    # Совпадение в названии весит больше, чем в описании: на «нужны перчатки»
+    # первыми должны идти перчатки, а не бинты, у которых в описании «под
+    # перчаткой». Модель читает выдачу сверху и говорит про первое.
+    title_score = " + ".join(
+        "(CASE WHEN lower_uni(p.title) LIKE ? THEN 1 ELSE 0 END)" for _ in terms
+    ) or "0"
+    score_params = [f"%{term}%" for term in terms]
+
     sql = f"""
         SELECT p.*,
+               {title_score} AS title_hits,
                COALESCE((SELECT SUM(v.stock) FROM product_variants v
                          WHERE {variant_where}), 0) AS matched_stock
         FROM products p
         WHERE {' AND '.join(where)}
-        ORDER BY p.sort_order, p.id DESC
+        ORDER BY title_hits DESC, p.sort_order, p.id DESC
         LIMIT ?
     """
     # Параметры идут в том же порядке, в каком плейсхолдеры встречаются в SQL:
-    # сначала подзапрос в SELECT, потом WHERE и его EXISTS.
-    sql_params = [*variant_params, *params, *variant_params, limit]
+    # сначала оба выражения в SELECT, потом WHERE и его EXISTS.
+    sql_params = [*score_params, *variant_params, *params, *variant_params, limit]
 
     async with get_connection() as conn:
         cursor = await conn.execute(sql, sql_params)
@@ -281,6 +340,67 @@ async def search_products(
             )
             product["variants"] = _rows(await cursor.fetchall())
         return products
+
+
+async def search_products(
+    query: str | None = None,
+    *,
+    category: str | None = None,
+    size: str | None = None,
+    color: str | None = None,
+    in_stock_only: bool = True,
+    limit: int = 10,
+) -> list[dict]:
+    """Поиск по каталогу — этим пользуется ИИ-консультант.
+
+    Ищем не фразой целиком, а по словам: клиент пишет «перчатки Start 12 oz», и
+    подстроки такой длины в базе нет ни у одного товара. Сначала пробуем самое
+    строгое условие, потом ослабляем — пустая выдача для продавца хуже, чем
+    лишний товар рядом с нужным, потому что на пустую бот отвечает «такого нет».
+
+    Скрытые товары не возвращаются никогда: если продавец убрал товар с витрины,
+    бот не должен его предлагать. in_stock_only=True отсекает товары, у которых
+    не осталось ни одного варианта в наличии (с учётом фильтров размера/цвета).
+    """
+    terms = _search_terms(query) if query else []
+
+    # Ослабляем условия по одному, от точного запроса к общему.
+    # Категория уходит первой: её ИИ обычно не спрашивает у клиента, а угадывает
+    # («одежда»), и такой категории в каталоге может не быть вовсе — тогда
+    # фильтр обнуляет выдачу, а бот отвечает «у нас этого нет».
+    # Размер и цвет снимаются следом: товар вернётся со всеми вариантами, и бот
+    # сможет сказать «размера L нет, есть M» вместо «такого товара у нас нет».
+    # Поиск по любому из слов (OR) — последняя попытка: лучше показать соседнее,
+    # чем ничего.
+    relaxations = [
+        (category, size, color, "AND"),
+        (None, size, color, "AND"),
+        (category, None, None, "AND"),
+        (None, None, None, "AND"),
+        (None, None, None, "OR"),
+    ]
+
+    tried: set[tuple] = set()
+    for attempt_category, attempt_size, attempt_color, join in relaxations:
+        if join == "OR" and len(terms) < 2:
+            continue  # по одному слову OR — это тот же самый запрос
+        key = (attempt_category, attempt_size, attempt_color, join)
+        if key in tried:
+            continue  # фильтра и так не было — повторять нечего
+        tried.add(key)
+
+        products = await _search_attempt(
+            terms,
+            join,
+            category=attempt_category,
+            size=attempt_size,
+            color=attempt_color,
+            in_stock_only=in_stock_only,
+            limit=limit,
+        )
+        if products:
+            return products
+    return []
 
 
 async def get_categories() -> list[str]:
@@ -587,19 +707,30 @@ async def clear_cart(client_id: int) -> None:
             "DELETE FROM cart_items WHERE cart_id = (SELECT id FROM carts WHERE client_id = ?)",
             (client_id,),
         )
+        # Корзина опустела — счётчик напоминаний обнуляем: то, что человек
+        # соберёт заново, это уже другая корзина, и о ней можно напомнить снова.
+        await conn.execute(
+            "UPDATE carts SET reminded_at = NULL WHERE client_id = ?", (client_id,)
+        )
         await conn.commit()
 
 
 async def get_abandoned_carts(hours: int) -> list[dict]:
     """Непустые корзины, которые не трогали дольше N часов и по которым нет
-    незавершённого заказа. Нужно для одного напоминания о брошенной корзине."""
+    незавершённого заказа. Нужно для одного напоминания о брошенной корзине.
+
+    Корзины с проставленным reminded_at не возвращаются вовсе: напоминание по
+    плану ровно одно, а корзина остаётся «брошенной» и на следующий час, и
+    через сутки — без этого условия задача слала бы его снова и снова.
+    """
     async with get_connection() as conn:
         cursor = await conn.execute(
             """SELECT c.client_id, c.channel, c.updated_at,
                       COUNT(ci.id) AS items
                FROM carts c
                JOIN cart_items ci ON ci.cart_id = c.id
-               WHERE datetime(c.updated_at) < datetime(?, ?)
+               WHERE c.reminded_at IS NULL
+                 AND datetime(c.updated_at) < datetime(?, ?)
                  AND NOT EXISTS (
                      SELECT 1 FROM orders o
                      WHERE o.client_id = c.client_id
@@ -609,6 +740,20 @@ async def get_abandoned_carts(hours: int) -> list[dict]:
             (config.now_str(), f"-{hours} hours"),
         )
         return _rows(await cursor.fetchall())
+
+
+async def mark_cart_reminded(client_id: int) -> None:
+    """Отмечает, что о корзине уже напомнили.
+
+    Ставится и тогда, когда сообщение не доставлено (бот заблокирован): иначе
+    задача будет ломиться в тот же чат каждый час.
+    """
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE carts SET reminded_at = ? WHERE client_id = ?",
+            (config.now_str(), client_id),
+        )
+        await conn.commit()
 
 
 # ─────────────────────────── Заказы ───────────────────────────
@@ -694,6 +839,11 @@ async def create_order(
                 )
 
             await conn.execute("DELETE FROM cart_items WHERE cart_id = ?", (cart["id"],))
+            # Корзина уехала в заказ — метку напоминания снимаем, чтобы следующая
+            # покупка начиналась с чистого листа (см. clear_cart).
+            await conn.execute(
+                "UPDATE carts SET reminded_at = NULL WHERE id = ?", (cart["id"],)
+            )
             await conn.commit()
             return "ok", order_id
         except BaseException:

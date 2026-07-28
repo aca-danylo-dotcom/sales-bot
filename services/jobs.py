@@ -30,11 +30,13 @@ async def cancel_expired_orders(bot: Bot) -> int:
     """Отменяет просроченные неоплаченные заказы. Возвращает число отменённых."""
     orders = await queries.get_expired_unpaid_orders(config.ORDER_PAYMENT_TIMEOUT_HOURS)
     cancelled = 0
+    gone: list[dict] = []
 
     for order in orders:
         if not await queries.cancel_order(order["id"], note="Не оплачен вовремя"):
             continue  # кто-то успел отменить или подтвердить заказ раньше
         cancelled += 1
+        gone.append(order)
 
         # Сообщение мягкое: человек мог просто передумать, и ругаться на него
         # незачем — он вернётся. Отдельно говорим, что товар снова доступен.
@@ -51,9 +53,27 @@ async def cancel_expired_orders(bot: Bot) -> int:
             logger.warning("Не удалось сообщить клиенту %s об отмене заказа %s",
                            order["client_id"], order["id"])
 
+    if gone:
+        await _notify_admin_expired(bot, gone)
     if cancelled:
         logger.info("Отменено неоплаченных заказов: %s", cancelled)
     return cancelled
+
+
+async def _notify_admin_expired(bot: Bot, orders: list[dict]) -> None:
+    """Сводка владельцу об автоотменах.
+
+    Нужна, потому что о каждом заказе владелец уже получил пуш при оформлении:
+    без этого сообщения он продолжал бы ждать оплату по заказу, которого нет.
+    Одним сообщением, а не по штуке на заказ — ночью их может накопиться.
+    """
+    lines = ["🕒 <b>Автоотмена неоплаченных заказов</b>", ""]
+    for order in orders:
+        lines.append(f"№{order['id']} — {money(order['total'])}, товар вернулся на склад")
+    try:
+        await bot.send_message(config.ADMIN_ID, "\n".join(lines), parse_mode="HTML")
+    except Exception:
+        logger.warning("Не удалось сообщить владельцу об автоотмене заказов")
 
 
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:

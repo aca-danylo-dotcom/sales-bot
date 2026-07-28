@@ -192,11 +192,25 @@ def payment_text(order: dict) -> str:
     )
 
 
-def admin_claim_text(order: dict, username: str | None = None) -> str:
-    """Заявка владельцу: состав, сумма и контакты одним сообщением."""
+# Заголовки пушей владельцу. Один и тот же заказ приходит дважды — при
+# оформлении и когда клиент сказал, что оплатил, — поэтому по первой строке
+# должно быть сразу видно, что именно случилось.
+_ADMIN_HEADERS = {
+    "new": ("🆕 <b>Новый заказ №{id}</b>",
+            "Реквизиты клиенту отправлены, ждём оплату."),
+    "paid": ("💳 <b>Клиент оплатил заказ №{id}</b>",
+             "Проверьте поступление и подтвердите."),
+}
+
+
+def admin_order_text(order: dict, username: str | None = None,
+                     kind: str = "paid") -> str:
+    """Пуш владельцу: состав, сумма и контакты одним сообщением."""
+    header, hint = _ADMIN_HEADERS[kind]
     contact = f"@{username}" if username else f"id {order['client_id']}"
     lines = [
-        f"💳 <b>Клиент оплатил заказ №{order['id']}</b>",
+        header.format(id=order["id"]),
+        hint,
         "",
         order_items_text(order),
         "",
@@ -259,12 +273,19 @@ async def notify_client(bot: Bot, client_id: int, text: str, markup=None) -> boo
         return False
 
 
-async def notify_admin_claim(bot: Bot, order: dict, username: str | None) -> None:
-    """Заявка владельцу об оплате. Ошибку глушим — заказ уже создан."""
+async def notify_admin_order(bot: Bot, order: dict, username: str | None,
+                             kind: str = "paid") -> None:
+    """Пуш владельцу о заказе. Ошибку глушим — заказ уже создан.
+
+    Кнопки «Оплата пришла» / «Отклонить» вешаем на оба пуша: деньги часто
+    приходят раньше, чем клиент вспоминает про кнопку «Я оплатил», и владелец
+    должен уметь закрыть заказ с первого же сообщения. Повторное решение по
+    тому же заказу отсекается проверкой статуса в handlers/admin.py.
+    """
     try:
         await bot.send_message(
             config.ADMIN_ID,
-            admin_claim_text(order, username),
+            admin_order_text(order, username, kind),
             reply_markup=admin_order_kb(order["id"]),
             parse_mode=_HTML,
         )
@@ -575,7 +596,7 @@ async def step_text(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(Checkout.confirm, F.data == CB_CONFIRM)
-async def checkout_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+async def checkout_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     """Создаёт заказ: списывает остатки, чистит корзину, шлёт реквизиты."""
     data = await state.get_data()
     client_id = callback.from_user.id
@@ -633,6 +654,9 @@ async def checkout_confirm(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.answer(
         payment_text(order), reply_markup=payment_kb(order_id), parse_mode=_HTML
     )
+    # Владелец узнаёт о заказе сразу, а не когда клиент нажмёт «Я оплатил»:
+    # товар уже снят с витрины, и о таком стоит знать в момент оформления.
+    await notify_admin_order(bot, order, callback.from_user.username, kind="new")
     await callback.answer()
 
 
@@ -664,7 +688,7 @@ async def claim_paid(callback: CallbackQuery, bot: Bot) -> None:
         f"Спасибо! Проверяем поступление по заказу №{order_id} и вернёмся с "
         f"подтверждением 🙌",
     )
-    await notify_admin_claim(bot, order, callback.from_user.username)
+    await notify_admin_order(bot, order, callback.from_user.username, kind="paid")
     await callback.answer()
 
 

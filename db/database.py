@@ -166,18 +166,9 @@ CREATE TABLE IF NOT EXISTS conversations (
 
 CREATE INDEX IF NOT EXISTS idx_conversations_client ON conversations(client_id, id);
 
--- === Пользователи веб-CRM ===
--- Таблица заводится сразу, наполняется с Фазы 10. Ролей нет: все, кто вошёл,
--- имеют одинаковые права.
-
-CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    login         TEXT    NOT NULL UNIQUE,
-    password_hash TEXT    NOT NULL,             -- scrypt, соль внутри строки
-    display_name  TEXT    NOT NULL DEFAULT '',
-    is_active     INTEGER NOT NULL DEFAULT 1,
-    created_at    TEXT    NOT NULL
-);
+-- Таблицы пользователей здесь нет: веб-CRM работает без входа, учётные записи
+-- заводить некому и незачем. Если вход когда-нибудь понадобится, таблица
+-- добавляется сюда же — старые базы её подхватят при следующем запуске.
 """
 
 

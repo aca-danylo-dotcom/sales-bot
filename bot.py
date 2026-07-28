@@ -68,8 +68,7 @@ async def main() -> None:
         await dp.start_polling(bot)
     finally:
         scheduler.shutdown(wait=False)
-        if web_runner is not None:
-            await web_runner.cleanup()
+        await web_runner.cleanup()
         await bot.session.close()
 
 

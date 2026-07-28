@@ -44,41 +44,12 @@ body {
 .topbar nav a:hover { text-decoration: underline; }
 .topbar .soon { color: var(--muted); }
 
-.logout {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
-}
-
-.logout .who { color: var(--muted); }
-
-.logout button {
-  padding: 6px 12px;
-  font-size: 14px;
-  background: var(--card);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.logout button:hover { border-color: var(--muted); }
-
 /* ─── Страница ─── */
 
 .page {
   max-width: 960px;
   margin: 0 auto;
   padding: 24px 20px 48px;
-}
-
-.center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  padding: 24px 20px;
 }
 
 h1 { margin: 0 0 8px; font-size: 24px; }
@@ -93,66 +64,3 @@ h2 { margin: 0 0 10px; font-size: 18px; }
 }
 
 .card p { margin: 0; color: var(--muted); }
-
-/* ─── Форма входа ─── */
-
-.login {
-  width: 100%;
-  max-width: 360px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.login label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 14px;
-  color: var(--muted);
-}
-
-.login input {
-  padding: 10px 12px;
-  font-size: 15px;
-  color: var(--text);
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-
-.login input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-  border-color: var(--accent);
-}
-
-.login button {
-  padding: 11px 16px;
-  font-size: 15px;
-  font-weight: 500;
-  color: #fff;
-  background: var(--accent);
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.login button:hover { background: #1d4ed8; }
-
-.login .error {
-  margin: 0;
-  padding: 10px 12px;
-  font-size: 14px;
-  color: var(--error);
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 6px;
-}
-
-.login .hint {
-  margin: 0;
-  font-size: 13px;
-  color: var(--muted);
-  text-align: center;
-}

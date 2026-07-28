@@ -7,20 +7,14 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-{% if user %}
-  <header class="topbar">
-    <a class="brand" href="/">CRM</a>
-    <nav>
-      <a href="/">Сводка</a>
-      <span class="soon">Товары</span>
-      <span class="soon">Заказы</span>
-    </nav>
-    <form class="logout" method="post" action="/logout">
-      <span class="who">{{ user.display_name or user.login }}</span>
-      <button type="submit">Выйти</button>
-    </form>
-  </header>
-{% endif %}
+<header class="topbar">
+  <a class="brand" href="/">CRM</a>
+  <nav>
+    <a href="/">Сводка</a>
+    <span class="soon">Товары</span>
+    <span class="soon">Заказы</span>
+  </nav>
+</header>
 
 <main class="{% block main_class %}page{% endblock %}">
   {% block content %}{% endblock %}

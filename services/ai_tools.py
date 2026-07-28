@@ -16,6 +16,7 @@ import json
 from dataclasses import dataclass, field
 
 from db import queries
+from services.format import ORDER_STATUS_RU  # noqa: F401 — используется ниже и в хендлерах
 
 # Сколько карточек с фото отправляем за один ответ. Больше — это уже спам в чат
 # и лишние мегабайты у клиента, к тому же Telegram шлёт их заметно дольше.
@@ -26,18 +27,6 @@ MAX_CARDS = 3
 _MAX_PRODUCTS = 5
 _MAX_VARIANTS = 20
 _MAX_DESCRIPTION = 300
-
-# Человеческие названия статусов заказа — чтобы модель не переводила их сама
-# и не выдумывала «в пути» там, где заказ ещё ждёт оплаты.
-ORDER_STATUS_RU = {
-    "new": "новый",
-    "awaiting_payment": "ждёт оплаты",
-    "paid_claimed": "клиент оплатил, ждём подтверждения",
-    "confirmed": "оплата подтверждена, готовим к отправке",
-    "shipped": "отправлен",
-    "done": "выполнен",
-    "cancelled": "отменён",
-}
 
 
 def _dump(obj) -> str:

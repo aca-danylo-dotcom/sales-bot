@@ -14,7 +14,7 @@ from __future__ import annotations
 import html
 import logging
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -59,7 +59,10 @@ from keyboards.admin import (
     variant_label,
     variants_kb,
 )
+from keyboards.orders import CB_ADMIN_NO, CB_ADMIN_OK
+from handlers.orders import notify_client, order_items_text
 from services import media
+from services.format import money
 
 logger = logging.getLogger(__name__)
 
@@ -744,3 +747,75 @@ async def delete_confirm(callback: CallbackQuery) -> None:
 
     await _show_list(callback, 0)
     await callback.answer("Товар удалён")
+
+
+# ─────────────────────── Решения по заказам ───────────────────────
+#
+# Живут именно здесь, под фильтром ADMIN_ID всего роутера: подтверждение
+# оплаты нельзя подделать чужим callback'ом. Клиентские кнопки заказа
+# (`o:`, `c:`) обрабатываются в handlers/orders.py и владельца тоже слушаются —
+# он должен уметь пользоваться ботом как покупатель.
+
+
+async def _finish_order_claim(callback: CallbackQuery, order: dict, verdict: str) -> None:
+    """Убирает кнопки с заявки и дописывает решение — чтобы не нажать дважды."""
+    text = callback.message.html_text if callback.message.text else ""
+    await _edit(callback, f"{text}\n\n{verdict}" if text else verdict, None)
+
+
+@router.callback_query(F.data.startswith(f"{CB_ADMIN_OK}:"))
+async def order_confirm(callback: CallbackQuery, bot: Bot) -> None:
+    """«Оплата пришла»: заказ в работу, клиенту — подтверждение."""
+    order_id = int(callback.data.split(":")[-1])
+    order = await queries.get_order(order_id)
+    if not order:
+        await callback.answer("Заказ не найден", show_alert=True)
+        return
+    if order["status"] not in ("awaiting_payment", "paid_claimed"):
+        await callback.answer(f"Заказ №{order_id} уже обработан", show_alert=True)
+        return
+
+    await queries.set_order_status(order_id, "confirmed")
+    delivered = await notify_client(
+        bot,
+        order["client_id"],
+        f"✅ Оплата по заказу №{order_id} получена, спасибо!\n\n"
+        f"{order_items_text(order)}\n\n"
+        f"Собираем заказ и отправляем Новой Почтой — номер накладной пришлём сюда же.",
+    )
+
+    note = "✅ <b>Оплата подтверждена</b>"
+    if not delivered:
+        note += "\n⚠️ Клиенту сообщить не удалось — бот заблокирован."
+    await _finish_order_claim(callback, order, note)
+    await callback.answer("Заказ подтверждён")
+
+
+@router.callback_query(F.data.startswith(f"{CB_ADMIN_NO}:"))
+async def order_reject(callback: CallbackQuery, bot: Bot) -> None:
+    """«Отклонить»: отмена заказа с возвратом остатков на склад."""
+    order_id = int(callback.data.split(":")[-1])
+    order = await queries.get_order(order_id)
+    if not order:
+        await callback.answer("Заказ не найден", show_alert=True)
+        return
+
+    # Возврат остатков делает сама cancel_order, одной транзакцией со сменой
+    # статуса. False — заказ уже был отменён, второй раз товар не вернётся.
+    if not await queries.cancel_order(order_id, note="Отклонён владельцем"):
+        await callback.answer(f"Заказ №{order_id} уже отменён", show_alert=True)
+        return
+
+    delivered = await notify_client(
+        bot,
+        order["client_id"],
+        f"К сожалению, оплату по заказу №{order_id} на {money(order['total'])} "
+        f"мы не нашли, поэтому заказ отменён — товар вернулся на витрину.\n\n"
+        f"Если оплата всё-таки прошла, напишите сюда: разберёмся и оформим заново 🙏",
+    )
+
+    note = "❌ <b>Заказ отклонён, товар вернулся на склад</b>"
+    if not delivered:
+        note += "\n⚠️ Клиенту сообщить не удалось — бот заблокирован."
+    await _finish_order_claim(callback, order, note)
+    await callback.answer("Заказ отклонён")

@@ -28,8 +28,10 @@ from services import agent_stats
 from services.ai import Message as ConvMessage
 from services.ai import ProviderUnavailable, run_agent
 from services.ai_tools import MAX_CARDS, TOOLS, ClientContext, build_executor
+from services.format import money, variant_label
 from services.prompts import build_instructions
 from keyboards.menus import main_menu
+from keyboards.orders import product_card_kb
 
 logger = logging.getLogger(__name__)
 router = Router(name="client")
@@ -108,27 +110,15 @@ def _clean_markup(text: str) -> str:
     return "\n".join(lines)
 
 
-def _money(value: float) -> str:
-    """Цена так, как её читает человек: 1 200 грн, без хвоста ,00."""
-    rounded = round(float(value), 2)
-    text = f"{rounded:,.0f}" if rounded == int(rounded) else f"{rounded:,.2f}"
-    return f"{text.replace(',', ' ')} {config.SHOP_CURRENCY}"
-
-
-def _variant_label(variant: dict) -> str:
-    parts = [p for p in (variant.get("size"), variant.get("color")) if p]
-    return " / ".join(parts) if parts else "один вариант"
-
-
 def _card_caption(product: dict) -> str:
     """Подпись к фото товара: название, цена и что реально есть в наличии."""
-    lines = [f"<b>{html.escape(product['title'])}</b>", _money(product["price"])]
+    lines = [f"<b>{html.escape(product['title'])}</b>", money(product["price"])]
 
     in_stock = [v for v in product["variants"] if v["stock"] > 0]
     if in_stock:
         lines += ["", "В наличии:"]
         for variant in in_stock[:10]:
-            lines.append(f"{html.escape(_variant_label(variant))} — {variant['stock']} шт.")
+            lines.append(f"{html.escape(variant_label(variant))} — {variant['stock']} шт.")
         if len(in_stock) > 10:
             lines.append(f"…и ещё {len(in_stock) - 10}")
     else:
@@ -279,9 +269,9 @@ async def _send_cards(message: Message, ctx: ClientContext) -> None:
     товары в ctx.show_products, а список хранит каждый товар один раз, поэтому
     в одном ответе одна и та же карточка не задваивается.
 
-    Инлайн-кнопок «В корзину» / «Оформить» здесь пока нет: их обработчики
-    появляются в Фазе 4 вместе с оформлением заказа, а кнопка без обработчика —
-    мёртвая. Положить товар в корзину сейчас умеет сам консультант (add_to_cart).
+    Под карточкой — кнопка «В корзину» (обработчики в handlers/orders.py):
+    положить товар может и сам консультант, но тап по кнопке короче, чем
+    объяснять модели, какой именно размер нужен.
     """
     for product_id in ctx.show_products[:MAX_CARDS]:
         product = await queries.get_product_full(product_id)
@@ -289,21 +279,33 @@ async def _send_cards(message: Message, ctx: ClientContext) -> None:
             continue
 
         caption = _card_caption(product)
+        markup = product_card_kb(product)  # None — если всё разобрали
         file_ids = [p["tg_file_id"] for p in product["photos"] if p["tg_file_id"]][:3]
         try:
             if not file_ids:
                 # Товар без фото — карточку всё равно показываем текстом, иначе
                 # клиент не увидит ни цены, ни точного остатка.
-                await message.answer(caption, parse_mode="HTML")
+                await message.answer(caption, parse_mode="HTML", reply_markup=markup)
             elif len(file_ids) == 1:
-                await message.answer_photo(file_ids[0], caption=caption, parse_mode="HTML")
+                await message.answer_photo(
+                    file_ids[0], caption=caption, parse_mode="HTML", reply_markup=markup
+                )
             else:
                 media = [InputMediaPhoto(media=file_ids[0], caption=caption,
                                          parse_mode="HTML")]
                 media += [InputMediaPhoto(media=file_id) for file_id in file_ids[1:]]
                 await message.answer_media_group(media)
+                # У альбома кнопок быть не может — досылаем их отдельной строкой,
+                # иначе товар с несколькими фото окажется единственным без кнопки.
+                if markup:
+                    await message.answer(
+                        f"<b>{html.escape(product['title'])}</b> — "
+                        f"{money(product['price'])}",
+                        parse_mode="HTML",
+                        reply_markup=markup,
+                    )
         except TelegramBadRequest:
             # file_id мог протухнуть (фото удалено на стороне Telegram) — отдаём
             # хотя бы текст карточки, а не роняем весь ответ.
             logger.exception("Не удалось отправить фото товара %s", product_id)
-            await message.answer(caption, parse_mode="HTML")
+            await message.answer(caption, parse_mode="HTML", reply_markup=markup)

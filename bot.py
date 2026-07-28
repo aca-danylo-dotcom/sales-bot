@@ -1,7 +1,9 @@
 """Точка входа бота-продавца.
 
-Сейчас подключены ИИ-клиент, админка каталога и оформление заказов. Веб-CRM
-добавляется на следующих этапах.
+Подключены ИИ-клиент, админка каталога, оформление заказов и веб-CRM. Всё в
+одном процессе: у бота и панели общая база SQLite, общая папка фото и общий
+планировщик — разнести их по двум процессам значило бы делить между ними файл
+базы, а SQLite такого не любит.
 
 Порядок роутеров важен и сохраняется дальше: детерминированные потоки (админка,
 заказы) регистрируются РАНЬШЕ клиентского, потому что тот ловит свободный текст
@@ -21,6 +23,7 @@ from services.jobs import setup_scheduler
 from handlers.admin import router as admin_router
 from handlers.client import router as client_router
 from handlers.orders import router as orders_router
+from web.app import start_web
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,12 +58,18 @@ async def main() -> None:
     # заказов, которые так и не оплатили.
     scheduler = setup_scheduler(bot)
 
+    # Веб-CRM поднимаем до polling: если порт занят, честнее упасть сразу, чем
+    # работать ботом и молча остаться без панели.
+    web_runner = await start_web()
+
     # skip старых апдейтов, накопившихся пока бот был офлайн
     await bot.delete_webhook(drop_pending_updates=True)
     try:
         await dp.start_polling(bot)
     finally:
         scheduler.shutdown(wait=False)
+        if web_runner is not None:
+            await web_runner.cleanup()
         await bot.session.close()
 
 

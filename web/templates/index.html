@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Сводка — {{ shop_name }}{% endblock %}
+
+{% block content %}
+<h1>{{ shop_name }}</h1>
+<p class="lead">Здравствуйте, {{ user.display_name or user.login }}.</p>
+
+<div class="card">
+  <h2>Панель ещё наполняется</h2>
+  <p>
+    Готов вход и общий каркас. Следующими появятся разделы
+    «Товары» (правка цен, остатков и фото) и «Заказы»
+    (статусы, ТТН, история переписки клиента с ботом).
+  </p>
+</div>
+{% endblock %}

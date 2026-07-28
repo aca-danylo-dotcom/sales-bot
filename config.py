@@ -114,6 +114,26 @@ ORDER_PAYMENT_TIMEOUT_HOURS: int = int(os.getenv("ORDER_PAYMENT_TIMEOUT_HOURS", 
 # которого клиент блокирует бота.
 CART_REMINDER_HOURS: int = int(os.getenv("CART_REMINDER_HOURS", "6"))
 
+# --- Веб-CRM ---
+# Ключ подписи cookie сессии. Пока он не задан, веб-панель не поднимается вовсе:
+# случайный ключ «на лету» разлогинивал бы всех при каждом рестарте, а зашитый в
+# код означал бы, что вход к чужой CRM подделывает любой, кто видел исходники.
+# Сгенерировать: py -c "import secrets; print(secrets.token_urlsafe(32))"
+WEB_SECRET: str = os.getenv("WEB_SECRET", "").strip()
+WEB_ENABLED: bool = bool(WEB_SECRET)
+# Хостинг сам сообщает порт в PORT — на нём и слушаем, иначе локальные 8080.
+WEB_PORT: int = int(os.getenv("PORT") or os.getenv("WEB_PORT", "8080"))
+WEB_HOST: str = os.getenv("WEB_HOST", "0.0.0.0")
+# Сколько дней держится вход. Менеджер работает каждый день, поэтому месяц —
+# разумный компромисс между «не логиниться каждое утро» и «забытая сессия».
+WEB_SESSION_DAYS: int = int(os.getenv("WEB_SESSION_DAYS", "30"))
+# True, если CRM открыта по https (на Railway так и есть). Тогда cookie помечается
+# Secure и не уедет по открытому каналу. Локально по http выключено, иначе
+# браузер cookie просто не сохранит.
+WEB_SECURE_COOKIE: bool = os.getenv("WEB_SECURE_COOKIE", "").strip().lower() in (
+    "1", "true", "yes",
+)
+
 # --- Пути ---
 # По умолчанию база лежит рядом с кодом — так удобно на своём ПК.
 # На хостинге так нельзя: при каждом обновлении бота папка с кодом создаётся

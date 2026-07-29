@@ -7,7 +7,7 @@
 <div class="head">
   <div>
     <h1>Новый товар</h1>
-    <p class="lead">Варианты и фото добавите на следующем шаге — в карточке.</p>
+    <p class="lead">Всё на одной странице: описание, размеры с остатками и фото.</p>
   </div>
 </div>
 
@@ -15,42 +15,114 @@
 <div class="card problems">
   <p class="strong">Не создал:</p>
   <ul>{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+  {% if had_photos %}<p class="small">Фото выберите заново — браузер их не запоминает.</p>{% endif %}
 </div>
 {% endif %}
 
-<section class="card">
-  <form class="form" method="post" action="/products/new">
-    <label>
-      <span>Название</span>
-      <input type="text" name="title" value="{{ draft.title or '' }}" maxlength="120"
-             placeholder="Перчатки боксёрские Venum" required autofocus>
-    </label>
+{# Одна форма на все три секции: товар заводится за один заход, а не «сначала
+   название, потом всё остальное в карточке». Секции внутри формы — обычная
+   разметка, трюк с form="id" здесь не нужен: вложенных форм тут нет. #}
+<form method="post" action="/products/new" enctype="multipart/form-data">
 
-    <div class="row">
+  <section class="card">
+    <h2>Основное</h2>
+    <div class="form">
       <label>
-        <span>Цена, {{ currency }}</span>
-        <input type="text" name="price" inputmode="decimal"
-               value="{{ draft.price or '' }}" placeholder="1200" required>
+        <span>Название</span>
+        <input type="text" name="title" value="{{ draft.title or '' }}" maxlength="120"
+               placeholder="Перчатки боксёрские Venum" required autofocus>
       </label>
+
+      <div class="row">
+        <label>
+          <span>Цена, {{ currency }}</span>
+          <input type="text" name="price" inputmode="decimal"
+                 value="{{ draft.price or '' }}" placeholder="1200" required>
+        </label>
+        <label>
+          <span>Старая цена</span>
+          <input type="text" name="old_price" inputmode="decimal"
+                 value="{{ draft.old_price or '' }}" placeholder="если есть скидка">
+        </label>
+      </div>
+
+      <div class="row">
+        <label>
+          <span>Категория</span>
+          {# Список-подсказка, но своё значение вписать можно: категории в этом
+             магазине не справочник, а привычка продавца. #}
+          <input type="text" name="category" value="{{ draft.category or '' }}"
+                 list="categories" maxlength="50" autocomplete="off">
+          <datalist id="categories">
+            {% for item in categories %}<option value="{{ item }}">{% endfor %}
+          </datalist>
+        </label>
+        <label>
+          <span>Артикул</span>
+          <input type="text" name="sku" value="{{ draft.sku or '' }}" maxlength="50">
+        </label>
+        <label class="narrow">
+          <span>Порядок</span>
+          <input type="text" name="sort_order" inputmode="numeric"
+                 value="{{ draft.sort_order or '' }}" placeholder="0">
+        </label>
+      </div>
+
       <label>
-        <span>Категория</span>
-        <input type="text" name="category" value="{{ draft.category or '' }}"
-               list="categories" maxlength="50" autocomplete="off">
-        <datalist id="categories">
-          {% for item in categories %}<option value="{{ item }}">{% endfor %}
-        </datalist>
+        <span>Описание</span>
+        <textarea name="description" rows="5" maxlength="1000">{{ draft.description or '' }}</textarea>
       </label>
     </div>
+  </section>
 
-    <label>
-      <span>Описание</span>
-      <textarea name="description" rows="5" maxlength="1000">{{ draft.description or '' }}</textarea>
-    </label>
+  <section class="card">
+    <h2>Размеры, цвета и остатки</h2>
+    <p class="muted">Без вариантов товар нельзя купить — заполните хотя бы одну строку.
+      Размеров больше, чем строк? Остальные добавите в карточке.</p>
 
-    <div class="actions">
-      <button class="btn primary" type="submit">Создать</button>
-      <span class="muted small">Товар создаётся скрытым — клиенты увидят его после публикации.</span>
+    <div class="form">
+      {# Подписи ставим только над первой строкой: ниже идут такие же поля, и
+         повторять «Размер / Цвет / Остаток» трижды — лишний шум. Для тех, кто
+         читает страницу голосом, подпись остаётся в aria-label. #}
+      {% for row in rows %}
+      <div class="row new-variant">
+        <label>
+          {% if loop.first %}<span>Размер</span>{% endif %}
+          <input type="text" name="new_size_{{ loop.index0 }}" maxlength="50"
+                 aria-label="Размер, строка {{ loop.index }}"
+                 placeholder="42 или M" value="{{ row.size }}">
+        </label>
+        <label>
+          {% if loop.first %}<span>Цвет</span>{% endif %}
+          <input type="text" name="new_color_{{ loop.index0 }}" maxlength="50"
+                 aria-label="Цвет, строка {{ loop.index }}"
+                 placeholder="чёрный" value="{{ row.color }}">
+        </label>
+        <label class="narrow">
+          {% if loop.first %}<span>Остаток</span>{% endif %}
+          <input type="text" name="new_stock_{{ loop.index0 }}" inputmode="numeric"
+                 aria-label="Остаток, строка {{ loop.index }}"
+                 placeholder="0" value="{{ row.stock }}">
+        </label>
+      </div>
+      {% endfor %}
     </div>
-  </form>
-</section>
+  </section>
+
+  <section class="card">
+    <h2>Фото</h2>
+    <div class="form upload">
+      <label>
+        <span>Выбрать фото</span>
+        <input type="file" name="photo" accept="image/*" multiple>
+      </label>
+      <span class="muted small">Можно выбрать сразу несколько — первое станет главным.</span>
+    </div>
+  </section>
+
+  <div class="actions sticky">
+    <button class="btn primary" type="submit">Создать товар</button>
+    <span class="muted small">Товар создаётся скрытым — клиенты увидят его после публикации.</span>
+  </div>
+</form>
 {% endblock %}

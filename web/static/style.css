@@ -231,6 +231,10 @@ h2 {
 
 .form { display: flex; flex-direction: column; gap: 18px; }
 
+/* Подсказка над блоком полей («без вариантов товар не купить») иначе прилипает
+   к первой строке формы: у абзацев внутри карточки отступов нет. */
+.card > p + .form { margin-top: 14px; }
+
 .form label { display: flex; flex-direction: column; gap: 7px; flex: 1; }
 .form label > span { font-size: 13px; color: var(--muted); }
 

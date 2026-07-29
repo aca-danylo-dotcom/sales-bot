@@ -285,16 +285,20 @@ async def _show_photos(callback: CallbackQuery, product_id: int) -> None:
 
 
 async def _send_album(message: Message, photos: list[dict]) -> None:
-    """Показывает снимки альбомом в том же порядке, что и кнопки под ним."""
+    """Показывает снимки альбомом в том же порядке, что и кнопки под ним.
+
+    Фото, загруженное в веб-CRM, file_id не имеет — его отправляем файлом с
+    диска, иначе владелец не увидел бы в боте то, что сам добавил в браузере.
+    """
     if not photos:
         return
-    album = [
-        InputMediaPhoto(media=photo["tg_file_id"])
-        for photo in photos[:10]
-        if photo["tg_file_id"]
-    ]
-    if album:
-        await message.answer_media_group(album)
+    shots = media.sendable(photos)[:10]
+    if not shots:
+        return
+    sent = await message.answer_media_group(
+        [InputMediaPhoto(media=shot) for _, shot in shots]
+    )
+    await media.remember_file_ids([photo for photo, _ in shots], sent)
 
 
 # ─────────────────────────── Меню ───────────────────────────

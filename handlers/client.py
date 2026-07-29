@@ -24,7 +24,7 @@ from aiogram.types import InputMediaPhoto, Message
 
 import config
 from db import queries
-from services import agent_stats
+from services import agent_stats, media
 from services.ai import Message as ConvMessage
 from services.ai import ProviderUnavailable, run_agent
 from services.ai_tools import MAX_CARDS, TOOLS, ClientContext, build_executor
@@ -280,21 +280,25 @@ async def _send_cards(message: Message, ctx: ClientContext) -> None:
 
         caption = _card_caption(product)
         markup = product_card_kb(product)  # None — если всё разобрали
-        file_ids = [p["tg_file_id"] for p in product["photos"] if p["tg_file_id"]][:3]
+        # Снятое в админке фото уходит по file_id, загруженное в веб-CRM —
+        # файлом с диска; выданный Telegram file_id запоминаем на будущее.
+        shots = media.sendable(product["photos"])[:3]
         try:
-            if not file_ids:
+            if not shots:
                 # Товар без фото — карточку всё равно показываем текстом, иначе
                 # клиент не увидит ни цены, ни точного остатка.
                 await message.answer(caption, parse_mode="HTML", reply_markup=markup)
-            elif len(file_ids) == 1:
-                await message.answer_photo(
-                    file_ids[0], caption=caption, parse_mode="HTML", reply_markup=markup
+            elif len(shots) == 1:
+                sent = await message.answer_photo(
+                    shots[0][1], caption=caption, parse_mode="HTML", reply_markup=markup
                 )
+                await media.remember_file_ids([shots[0][0]], sent)
             else:
-                media = [InputMediaPhoto(media=file_ids[0], caption=caption,
+                album = [InputMediaPhoto(media=shots[0][1], caption=caption,
                                          parse_mode="HTML")]
-                media += [InputMediaPhoto(media=file_id) for file_id in file_ids[1:]]
-                await message.answer_media_group(media)
+                album += [InputMediaPhoto(media=shot) for _, shot in shots[1:]]
+                sent = await message.answer_media_group(album)
+                await media.remember_file_ids([photo for photo, _ in shots], sent)
                 # У альбома кнопок быть не может — досылаем их отдельной строкой,
                 # иначе товар с несколькими фото окажется единственным без кнопки.
                 if markup:

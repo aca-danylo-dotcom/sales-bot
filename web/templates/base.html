@@ -8,15 +8,21 @@
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/">CRM</a>
+  <a class="brand" href="/">{{ shop_name|default('CRM') }}</a>
   <nav>
-    <a href="/">Сводка</a>
-    <span class="soon">Товары</span>
-    <span class="soon">Заказы</span>
+    {% set active = section|default('') %}
+    <a href="/" class="{{ 'active' if active == 'index' }}">Сводка</a>
+    <a href="/products" class="{{ 'active' if active == 'products' }}">Товары</a>
+    <a href="/stock" class="{{ 'active' if active == 'stock' }}">Склад</a>
+    <span class="soon" title="Появится в следующей фазе">Заказы</span>
   </nav>
 </header>
 
 <main class="{% block main_class %}page{% endblock %}">
+  {# Результат последнего действия: код приезжает в адресе, текст берётся из
+     словаря на сервере — подсунуть в строку своё сообщение нельзя. #}
+  {% if message %}<p class="flash ok">{{ message }}</p>{% endif %}
+  {% if error %}<p class="flash err">{{ error }}</p>{% endif %}
   {% block content %}{% endblock %}
 </main>
 </body>

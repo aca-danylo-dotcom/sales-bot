@@ -1,0 +1,475 @@
+"""Раздел «Товары» веб-CRM: список, карточка, склад, фото.
+
+Зачем он рядом с админкой в Telegram, а не вместо неё: телефон удобен, чтобы
+сфотографировать товар и завести его на месте, браузер — чтобы поправить три
+десятка цен и остатков за один заход. База у них одна, поэтому товар, созданный
+в боте, здесь правится, а изменённый здесь остаток бот отдаёт клиенту сразу же:
+кеша каталога нет, каждый запрос идёт в SQLite.
+
+Страницы работают без JavaScript: обычные формы и схема «POST → редирект → GET»
+(редирект нужен, чтобы обновление страницы не повторяло сохранение). Результат
+действия переезжает в адрес кодом (`?ok=saved`), а не текстом — так в адресную
+строку нельзя подсунуть произвольное сообщение якобы от панели.
+"""
+from __future__ import annotations
+
+import logging
+from urllib.parse import urlencode
+from uuid import uuid4
+
+import aiohttp_jinja2
+from aiohttp import web
+
+import config
+from db import queries
+from services import media
+from web import forms
+
+logger = logging.getLogger(__name__)
+
+# Категории-подсказки те же, что кнопками в боте: список не жёсткий, продавец
+# может вписать свою, но расходиться эти два места не должны.
+from keyboards.admin import CATEGORIES  # noqa: E402  (после логгера — как и остальные импорты проекта)
+
+PAGE_SIZE = 20
+
+# Что показать после действия. Текст держим здесь, в адресе — только ключ.
+MESSAGES = {
+    "saved": "Изменения сохранены.",
+    "created": "Товар создан. Добавьте варианты и фото — без вариантов его нельзя купить.",
+    "deleted": "Товар удалён.",
+    "shown": "Товар вернулся в продажу.",
+    "hidden": "Товар скрыт — клиентам он больше не показывается.",
+    "stock": "Остатки сохранены.",
+    "stock_none": "Менять было нечего — остатки и так такие.",
+    "variant_added": "Вариант добавлен.",
+    "variant_deleted": "Вариант удалён.",
+    "photo_added": "Фото загружено.",
+    "photo_main": "Главное фото изменено.",
+    "photo_deleted": "Фото удалено.",
+}
+
+ERRORS = {
+    "photo_type": "Нужен файл-картинка: JPG, PNG или WebP.",
+    "photo_empty": "Файл не выбран.",
+    "variant_exists": "Такой вариант уже есть — измените остаток в таблице.",
+    "stock_bad": "Остаток — целое число от 0. Ничего не сохранил.",
+    "not_found": "Товар не найден — возможно, его уже удалили.",
+}
+
+# Картинки принимаем по содержимому, а не по имени файла: расширение легко
+# переименовать, а первые байты подделать сложнее. Заодно так узнаём, с каким
+# расширением класть файл на диск, чтобы веб отдавал его с верным типом.
+_SIGNATURES: list[tuple[bytes, str]] = [
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
+]
+MAX_PHOTO_BYTES = 12 * 1024 * 1024
+
+
+def _image_suffix(data: bytes) -> str | None:
+    """Расширение по сигнатуре файла. None — это не картинка."""
+    for signature, suffix in _SIGNATURES:
+        if data.startswith(signature):
+            return suffix
+    # WebP: 'RIFF' + 4 байта длины + 'WEBP'
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
+def _redirect(location: str, **params: str) -> web.HTTPFound:
+    """Редирект после действия, с кодом результата в адресе."""
+    query = urlencode({k: v for k, v in params.items() if v})
+    raise web.HTTPFound(f"{location}?{query}" if query else location)
+
+
+def _filters(request: web.Request) -> dict:
+    """Поисковый запрос и фильтры списка — в том виде, в каком их ждёт БД."""
+    query = request.query
+    return {
+        "query": forms.text(query, "q", max_len=100) or None,
+        "category": forms.text(query, "category", max_len=50) or None,
+        "status": forms.status_filter(query.get("status")),
+        "in_stock": forms.stock_filter(query.get("stock")),
+    }
+
+
+def _filters_qs(request: web.Request) -> str:
+    """Те же фильтры строкой для ссылок — чтобы пагинация их не теряла."""
+    keep = {k: v for k, v in request.query.items()
+            if k in ("q", "category", "status", "stock") and v}
+    return urlencode(keep)
+
+
+def _page_context(request: web.Request) -> dict:
+    """Общее для всех страниц раздела: сообщение о результате и активный пункт меню."""
+    return {
+        "shop_name": config.SHOP_NAME,
+        "currency": config.SHOP_CURRENCY,
+        "message": MESSAGES.get(request.query.get("ok", "")),
+        "error": ERRORS.get(request.query.get("err", "")),
+    }
+
+
+# ─────────────────────────── Список ───────────────────────────
+
+
+@aiohttp_jinja2.template("products.html")
+async def products_list(request: web.Request) -> dict:
+    filters = _filters(request)
+    page = forms.page(request.query.get("page"))
+
+    total = await queries.count_products(**filters)
+    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(page, pages - 1)
+    products = await queries.list_products(
+        **filters, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+    )
+
+    return {
+        **_page_context(request),
+        "section": "products",
+        "products": products,
+        "categories": await queries.get_all_categories(),
+        "total": total,
+        "page": page + 1,
+        "pages": pages,
+        "filters_qs": _filters_qs(request),
+        "q": request.query.get("q", ""),
+        "category": request.query.get("category", ""),
+        "status": request.query.get("status", ""),
+        "stock": request.query.get("stock", ""),
+    }
+
+
+# ─────────────────────────── Карточка ───────────────────────────
+
+
+async def _card_context(request: web.Request, product: dict, **extra) -> dict:
+    return {
+        **_page_context(request),
+        "section": "products",
+        "product": product,
+        "categories": sorted(set(CATEGORIES) | set(await queries.get_all_categories())),
+        "back_qs": _filters_qs(request),
+        **extra,
+    }
+
+
+@aiohttp_jinja2.template("product.html")
+async def product_card(request: web.Request) -> dict:
+    product_id = int(request.match_info["id"])
+    product = await queries.get_product_full(product_id)
+    if not product:
+        raise web.HTTPNotFound(text="Товар не найден")
+    return await _card_context(request, product)
+
+
+async def product_save(request: web.Request) -> web.Response:
+    """Сохраняет основные поля товара. Ошибку показываем прямо в форме."""
+    product_id = int(request.match_info["id"])
+    product = await queries.get_product_full(product_id)
+    if not product:
+        raise web.HTTPNotFound(text="Товар не найден")
+
+    data = await request.post()
+    title = forms.text(data, "title", max_len=forms.MAX_TITLE)
+    price = forms.price(data.get("price"))
+    old_price, old_price_ok = forms.optional_price(data.get("old_price"))
+
+    problems = []
+    if not title:
+        problems.append("Название не может быть пустым.")
+    if price is None:
+        problems.append("Цена — число больше нуля, например 1200 или 1200,50.")
+    if not old_price_ok:
+        problems.append("Старую цену либо оставьте пустой, либо введите числом.")
+
+    if problems:
+        # Не редиректим: человек только что набрал текст, и терять его нельзя.
+        # Показываем форму с тем, что он ввёл, и списком замечаний.
+        product.update({
+            "title": title or product["title"],
+            "description": forms.text(data, "description", max_len=forms.MAX_DESCRIPTION),
+            "category": forms.text(data, "category"),
+            "sku": forms.text(data, "sku"),
+        })
+        context = await _card_context(
+            request, product,
+            problems=problems,
+            raw_price=data.get("price", ""),
+            raw_old_price=data.get("old_price", ""),
+        )
+        return aiohttp_jinja2.render_template("product.html", request, context)
+
+    await queries.update_product(
+        product_id,
+        title=title,
+        description=forms.text(data, "description", max_len=forms.MAX_DESCRIPTION),
+        category=forms.text(data, "category"),
+        sku=forms.text(data, "sku") or None,
+        price=price,
+        old_price=old_price,
+        sort_order=forms.integer(data.get("sort_order"), minimum=-9999, maximum=9999) or 0,
+    )
+    _redirect(f"/products/{product_id}", ok="saved")
+
+
+@aiohttp_jinja2.template("product_new.html")
+async def product_new_form(request: web.Request) -> dict:
+    return {
+        **_page_context(request),
+        "section": "products",
+        "categories": sorted(set(CATEGORIES) | set(await queries.get_all_categories())),
+        "draft": {},
+        "problems": [],
+    }
+
+
+async def product_create(request: web.Request) -> web.Response:
+    data = await request.post()
+    title = forms.text(data, "title", max_len=forms.MAX_TITLE)
+    price = forms.price(data.get("price"))
+
+    problems = []
+    if not title:
+        problems.append("Без названия товар не создать.")
+    if price is None:
+        problems.append("Цена — число больше нуля, например 1200 или 1200,50.")
+
+    if problems:
+        context = {
+            **_page_context(request),
+            "section": "products",
+            "categories": sorted(set(CATEGORIES) | set(await queries.get_all_categories())),
+            "draft": {
+                "title": title,
+                "description": forms.text(data, "description", max_len=forms.MAX_DESCRIPTION),
+                "category": forms.text(data, "category"),
+                "price": data.get("price", ""),
+            },
+            "problems": problems,
+        }
+        return aiohttp_jinja2.render_template("product_new.html", request, context)
+
+    # Новый товар заводится скрытым — ровно как в мастере бота. Пока нет ни
+    # вариантов, ни фото, показывать его клиенту нечем.
+    product_id = await queries.create_product(
+        title,
+        price,
+        description=forms.text(data, "description", max_len=forms.MAX_DESCRIPTION),
+        category=forms.text(data, "category"),
+    )
+    await queries.set_product_active(product_id, False)
+    _redirect(f"/products/{product_id}", ok="created")
+
+
+async def product_toggle(request: web.Request) -> web.Response:
+    product_id = int(request.match_info["id"])
+    product = await queries.get_product(product_id)
+    if not product:
+        raise web.HTTPNotFound(text="Товар не найден")
+
+    new_state = not product["is_active"]
+    await queries.set_product_active(product_id, new_state)
+    _redirect(f"/products/{product_id}", ok="shown" if new_state else "hidden")
+
+
+async def product_delete(request: web.Request) -> web.Response:
+    product_id = int(request.match_info["id"])
+    # Записи о фото уходят каскадом, файлы на диске — руками.
+    for photo in await queries.get_photos(product_id):
+        media.remove_photo_file(photo["file_path"])
+    await queries.delete_product(product_id)
+    _redirect("/products", ok="deleted")
+
+
+# ─────────────────────── Варианты и остатки ───────────────────────
+
+
+async def variants_save(request: web.Request) -> web.Response:
+    """Одна форма на всю таблицу вариантов: остатки, добавление, удаление."""
+    product_id = int(request.match_info["id"])
+    data = await request.post()
+
+    # Удаление приходит кнопкой внутри той же формы. Обрабатываем первым: если
+    # человек нажал «Удалить», правки в остальных строках он не подтверждал.
+    delete_id = forms.integer(data.get("delete_variant"))
+    if delete_id:
+        await queries.delete_variant(delete_id)
+        _redirect(f"/products/{product_id}", ok="variant_deleted")
+
+    # Остатки сохраняем в любом случае, даже если нажата кнопка «Добавить»:
+    # правки в таблице сделаны, и терять их из-за соседнего действия нечестно.
+    pairs, bad = _stock_pairs(data, prefix="stock_")
+    if bad:
+        _redirect(f"/products/{product_id}", err="stock_bad")
+    changed = await queries.set_variants_stock(pairs)
+
+    size = forms.text(data, "new_size")
+    color = forms.text(data, "new_color")
+    if size or color or data.get("new_stock"):
+        existing = {(v["size"], v["color"]) for v in await queries.get_variants(product_id)}
+        if (size, color) in existing:
+            _redirect(f"/products/{product_id}", err="variant_exists")
+        await queries.add_variant(
+            product_id, size=size, color=color, stock=forms.integer(data.get("new_stock")) or 0
+        )
+        _redirect(f"/products/{product_id}", ok="variant_added")
+
+    _redirect(f"/products/{product_id}", ok="stock" if changed else "stock_none")
+
+
+def _stock_pairs(data, *, prefix: str) -> tuple[list[tuple[int, int]], bool]:
+    """Собирает (variant_id, stock) из полей формы. Второе значение — были ли ошибки.
+
+    Ошибка хотя бы в одном поле отменяет всё сохранение: наполовину сохранённый
+    склад хуже, чем несохранённый, — по нему продолжат торговать, не заметив.
+    """
+    pairs: list[tuple[int, int]] = []
+    for key, value in data.items():
+        if not key.startswith(prefix):
+            continue
+        variant_id = forms.integer(key[len(prefix):])
+        stock = forms.integer(value)
+        if variant_id is None or stock is None:
+            return [], True
+        pairs.append((variant_id, stock))
+    return pairs, False
+
+
+@aiohttp_jinja2.template("stock.html")
+async def stock_page(request: web.Request) -> dict:
+    """Все варианты подходящих товаров одной таблицей — правка склада разом."""
+    filters = _filters(request)
+    rows = await queries.list_stock_rows(**filters)
+    return {
+        **_page_context(request),
+        "section": "stock",
+        "rows": rows,
+        "categories": await queries.get_all_categories(),
+        "filters_qs": _filters_qs(request),
+        "q": request.query.get("q", ""),
+        "category": request.query.get("category", ""),
+        "status": request.query.get("status", ""),
+        "stock": request.query.get("stock", ""),
+    }
+
+
+async def stock_save(request: web.Request) -> web.Response:
+    data = await request.post()
+    pairs, bad = _stock_pairs(data, prefix="stock_")
+    qs = _filters_qs(request)
+    tail = f"&{qs}" if qs else ""
+    if bad:
+        raise web.HTTPFound(f"/stock?err=stock_bad{tail}")
+    changed = await queries.set_variants_stock(pairs)
+    raise web.HTTPFound(f"/stock?ok={'stock' if changed else 'stock_none'}{tail}")
+
+
+# ─────────────────────────── Фото ───────────────────────────
+
+
+async def photo_upload(request: web.Request) -> web.Response:
+    """Загрузка фото товара. Можно выбрать сразу несколько файлов."""
+    product_id = int(request.match_info["id"])
+    if not await queries.get_product(product_id):
+        raise web.HTTPNotFound(text="Товар не найден")
+
+    data = await request.post()
+    fields = [f for f in data.getall("photo", []) if getattr(f, "filename", "")]
+    if not fields:
+        _redirect(f"/products/{product_id}", err="photo_empty")
+
+    saved = 0
+    for field in fields:
+        content = field.file.read(MAX_PHOTO_BYTES + 1)
+        suffix = _image_suffix(content)
+        if not suffix or len(content) > MAX_PHOTO_BYTES:
+            continue
+
+        file_name = f"{product_id}_{uuid4().hex[:8]}{suffix}"
+        try:
+            (media.media_dir() / file_name).write_bytes(content)
+        except OSError:
+            logger.exception("Не удалось сохранить фото товара %s", product_id)
+            continue
+
+        # tg_file_id нет: файл в Telegram не загружался. Бот отправит его с диска
+        # и запомнит выданный file_id при первом показе (см. services/media.py).
+        existing = await queries.get_photos(product_id)
+        await queries.add_photo(
+            product_id, file_path=file_name, is_main=not existing, sort_order=len(existing)
+        )
+        saved += 1
+
+    _redirect(f"/products/{product_id}", **({"ok": "photo_added"} if saved
+                                            else {"err": "photo_type"}))
+
+
+async def photo_main(request: web.Request) -> web.Response:
+    photo_id = int(request.match_info["id"])
+    product_id = await queries.set_photo_main(photo_id)
+    if not product_id:
+        raise web.HTTPNotFound(text="Фото не найдено")
+    _redirect(f"/products/{product_id}", ok="photo_main")
+
+
+async def photo_delete(request: web.Request) -> web.Response:
+    photo_id = int(request.match_info["id"])
+    photo = await queries.delete_photo(photo_id)
+    if not photo:
+        raise web.HTTPNotFound(text="Фото не найдено")
+
+    media.remove_photo_file(photo["file_path"])
+    # Удалили главное — главным становится первое из оставшихся, иначе товар
+    # окажется без картинки в карточке у клиента.
+    remaining = await queries.get_photos(photo["product_id"])
+    if photo["is_main"] and remaining:
+        await queries.set_photo_main(remaining[0]["id"])
+    _redirect(f"/products/{photo['product_id']}", ok="photo_deleted")
+
+
+async def photo_file(request: web.Request) -> web.FileResponse:
+    """Отдаёт файл фотографии по /media/<photo_id>.
+
+    Прямая ссылка нужна не только панели: по этому же адресу картинку заберёт
+    Instagram Direct, которому telegram file_id ни о чём не говорит.
+    """
+    photo_id = int(request.match_info["id"])
+    photo = await queries.get_photo(photo_id)
+    if not photo or not photo["file_path"]:
+        raise web.HTTPNotFound(text="Файл не найден")
+
+    # В базе лежит только имя файла. Разделители пути означали бы, что запись
+    # подменили, — наружу из папки медиа не выходим.
+    name = photo["file_path"]
+    if "/" in name or "\\" in name or name.startswith("."):
+        raise web.HTTPNotFound(text="Файл не найден")
+
+    path = media.photo_path(name)
+    if not path.is_file():
+        raise web.HTTPNotFound(text="Файл не найден")
+    # Имя файла случайное и меняется при перезагрузке фото, поэтому кешировать
+    # надолго безопасно: другая картинка приедет по другому адресу.
+    return web.FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
+
+
+def setup_routes(app: web.Application) -> None:
+    app.router.add_get("/products", products_list)
+    app.router.add_get("/products/new", product_new_form)
+    app.router.add_post("/products/new", product_create)
+    app.router.add_get(r"/products/{id:\d+}", product_card)
+    app.router.add_post(r"/products/{id:\d+}", product_save)
+    app.router.add_post(r"/products/{id:\d+}/variants", variants_save)
+    app.router.add_post(r"/products/{id:\d+}/toggle", product_toggle)
+    app.router.add_post(r"/products/{id:\d+}/delete", product_delete)
+    app.router.add_post(r"/products/{id:\d+}/photos", photo_upload)
+    app.router.add_post(r"/photos/{id:\d+}/main", photo_main)
+    app.router.add_post(r"/photos/{id:\d+}/delete", photo_delete)
+    app.router.add_get("/stock", stock_page)
+    app.router.add_post("/stock", stock_save)
+    app.router.add_get(r"/media/{id:\d+}", photo_file)

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Склад — {{ shop_name }}{% endblock %}
+
+{% block content %}
+<div class="head">
+  <div>
+    <h1>Склад</h1>
+    <p class="lead">Все размеры и цвета одной таблицей: правьте сколько нужно и сохраните разом.</p>
+  </div>
+</div>
+
+<form class="filters card" method="get" action="/stock">
+  <input type="search" name="q" value="{{ q }}" placeholder="Название, артикул или id"
+         autocomplete="off">
+  <select name="category">
+    <option value="">Все категории</option>
+    {% for item in categories %}
+      <option value="{{ item }}" {{ 'selected' if item == category }}>{{ item }}</option>
+    {% endfor %}
+  </select>
+  <select name="status">
+    <option value="">Все</option>
+    <option value="active" {{ 'selected' if status == 'active' }}>В продаже</option>
+    <option value="hidden" {{ 'selected' if status == 'hidden' }}>Скрытые</option>
+  </select>
+  <select name="stock">
+    <option value="">Любой остаток</option>
+    <option value="in" {{ 'selected' if stock == 'in' }}>Есть в наличии</option>
+    <option value="out" {{ 'selected' if stock == 'out' }}>Закончились</option>
+  </select>
+  <button class="btn" type="submit">Показать</button>
+  {% if filters_qs %}<a class="btn ghost" href="/stock">Сбросить</a>{% endif %}
+</form>
+
+{% if rows %}
+{# Фильтры уезжают в адрес формы: после сохранения человек должен вернуться
+   к тому же отбору, а не к полному списку склада. #}
+<form method="post" action="/stock{% if filters_qs %}?{{ filters_qs }}{% endif %}">
+  <div class="card table-wrap">
+    <table class="grid">
+      <thead>
+        <tr>
+          <th>Товар</th>
+          <th>Вариант</th>
+          <th class="num">Цена</th>
+          <th class="num">Остаток</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>
+            <a class="strong" href="/products/{{ row.product_id }}">{{ row.title }}</a>
+            <span class="muted small">
+              {{ row.category or 'без категории' }}{% if not row.is_active %} · скрыт{% endif %}
+            </span>
+          </td>
+          <td>{{ row|variant }}</td>
+          <td class="num muted">{{ row.price|money }}</td>
+          <td class="num">
+            <input class="stock {{ 'zero' if not row.stock }}" type="text" inputmode="numeric"
+                   name="stock_{{ row.id }}" value="{{ row.stock }}">
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="actions sticky">
+    <button class="btn primary" type="submit">Сохранить остатки</button>
+    <span class="muted small">Строк на экране: {{ rows|length }}</span>
+  </div>
+</form>
+{% else %}
+<div class="card empty-state">
+  <p>{% if filters_qs %}Под фильтр не попал ни один вариант.{% else %}Вариантов пока нет.{% endif %}</p>
+  <p class="muted">Размеры и цвета заводятся в карточке товара.</p>
+</div>
+{% endif %}
+{% endblock %}

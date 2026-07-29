@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}{{ product.title }} — {{ shop_name }}{% endblock %}
+
+{% block content %}
+<p class="back"><a href="/products{% if back_qs %}?{{ back_qs }}{% endif %}">‹ Все товары</a></p>
+
+<div class="head">
+  <div>
+    <h1>{{ product.title }}</h1>
+    <p class="lead">
+      #{{ product.id }} ·
+      {% if product.is_active %}<span class="tag on">В продаже</span>
+      {% else %}<span class="tag off">Скрыт</span>{% endif %}
+      · остаток {{ product.total_stock }}
+    </p>
+  </div>
+  <div class="head-actions">
+    <form method="post" action="/products/{{ product.id }}/toggle">
+      <button class="btn" type="submit">{{ 'Скрыть' if product.is_active else 'Вернуть в продажу' }}</button>
+    </form>
+    {# Подтверждение — обычным confirm: страницы работают без JS, и если он
+       выключен, товар просто удалится по нажатию, а не окажется неудаляемым. #}
+    <form method="post" action="/products/{{ product.id }}/delete"
+          onsubmit="return confirm('Удалить товар вместе с вариантами и фото?')">
+      <button class="btn danger-btn" type="submit">Удалить</button>
+    </form>
+  </div>
+</div>
+
+{% if problems is defined and problems %}
+<div class="card problems">
+  <p class="strong">Не сохранил:</p>
+  <ul>{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<section class="card">
+  <h2>Основное</h2>
+  <form class="form" method="post" action="/products/{{ product.id }}">
+    <label>
+      <span>Название</span>
+      <input type="text" name="title" value="{{ product.title }}" maxlength="120" required>
+    </label>
+
+    <div class="row">
+      <label>
+        <span>Цена, {{ currency }}</span>
+        <input type="text" name="price" inputmode="decimal"
+               value="{{ raw_price if raw_price is defined else product.price|plain }}" required>
+      </label>
+      <label>
+        <span>Старая цена</span>
+        <input type="text" name="old_price" inputmode="decimal"
+               value="{{ raw_old_price if raw_old_price is defined else product.old_price|plain }}"
+               placeholder="если есть скидка">
+      </label>
+    </div>
+
+    <div class="row">
+      <label>
+        <span>Категория</span>
+        {# Список-подсказка, но своё значение вписать можно: категории в этом
+           магазине не справочник, а привычка продавца. #}
+        <input type="text" name="category" value="{{ product.category }}" list="categories"
+               maxlength="50" autocomplete="off">
+        <datalist id="categories">
+          {% for item in categories %}<option value="{{ item }}">{% endfor %}
+        </datalist>
+      </label>
+      <label>
+        <span>Артикул</span>
+        <input type="text" name="sku" value="{{ product.sku or '' }}" maxlength="50">
+      </label>
+      <label class="narrow">
+        <span>Порядок</span>
+        <input type="text" name="sort_order" inputmode="numeric"
+               value="{{ product.sort_order }}">
+      </label>
+    </div>
+
+    <label>
+      <span>Описание</span>
+      <textarea name="description" rows="5" maxlength="1000">{{ product.description }}</textarea>
+    </label>
+
+    <div class="actions">
+      <button class="btn primary" type="submit">Сохранить</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Размеры, цвета и остатки</h2>
+  {% if not product.variants %}
+    <p class="muted">Вариантов нет — купить товар нельзя. Добавьте хотя бы один.</p>
+  {% endif %}
+
+  <form class="form" method="post" action="/products/{{ product.id }}/variants">
+    {% if product.variants %}
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr><th>Размер</th><th>Цвет</th><th class="num">Остаток</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for variant in product.variants %}
+          <tr>
+            <td>{{ variant.size or '—' }}</td>
+            <td>{{ variant.color or '—' }}</td>
+            <td class="num">
+              <input class="stock" type="text" inputmode="numeric"
+                     name="stock_{{ variant.id }}" value="{{ variant.stock }}">
+            </td>
+            <td class="num">
+              <button class="btn ghost small" type="submit"
+                      name="delete_variant" value="{{ variant.id }}"
+                      onclick="return confirm('Удалить вариант?')">Удалить</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <div class="row new-variant">
+      <label>
+        <span>Новый размер</span>
+        <input type="text" name="new_size" maxlength="50" placeholder="42 или M">
+      </label>
+      <label>
+        <span>Цвет</span>
+        <input type="text" name="new_color" maxlength="50" placeholder="чёрный">
+      </label>
+      <label class="narrow">
+        <span>Остаток</span>
+        <input type="text" name="new_stock" inputmode="numeric" placeholder="0">
+      </label>
+    </div>
+
+    <div class="actions">
+      <button class="btn primary" type="submit">Сохранить остатки</button>
+      <span class="muted small">Заполните нижнюю строку — вариант добавится вместе с сохранением.</span>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Фото</h2>
+  {% if product.photos %}
+  <div class="photos">
+    {% for photo in product.photos %}
+    <figure class="photo {{ 'main' if photo.is_main }}">
+      <a href="/media/{{ photo.id }}" target="_blank" rel="noopener">
+        <img src="/media/{{ photo.id }}" alt="" loading="lazy">
+      </a>
+      <figcaption>
+        {% if photo.is_main %}
+          <span class="tag on">Главное</span>
+        {% else %}
+          <form method="post" action="/photos/{{ photo.id }}/main">
+            <button class="btn ghost small" type="submit">Сделать главным</button>
+          </form>
+        {% endif %}
+        <form method="post" action="/photos/{{ photo.id }}/delete">
+          <button class="btn ghost small" type="submit">Удалить</button>
+        </form>
+      </figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+  {% else %}
+    <p class="muted">Фото пока нет. Клиенту такой товар уйдёт текстом.</p>
+  {% endif %}
+
+  <form class="form upload" method="post" action="/products/{{ product.id }}/photos"
+        enctype="multipart/form-data">
+    <label>
+      <span>Добавить фото</span>
+      <input type="file" name="photo" accept="image/*" multiple required>
+    </label>
+    <button class="btn" type="submit">Загрузить</button>
+  </form>
+</section>
+{% endblock %}

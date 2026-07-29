@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Новый товар — {{ shop_name }}{% endblock %}
+
+{% block content %}
+<p class="back"><a href="/products">‹ Все товары</a></p>
+
+<div class="head">
+  <div>
+    <h1>Новый товар</h1>
+    <p class="lead">Варианты и фото добавите на следующем шаге — в карточке.</p>
+  </div>
+</div>
+
+{% if problems %}
+<div class="card problems">
+  <p class="strong">Не создал:</p>
+  <ul>{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<section class="card">
+  <form class="form" method="post" action="/products/new">
+    <label>
+      <span>Название</span>
+      <input type="text" name="title" value="{{ draft.title or '' }}" maxlength="120"
+             placeholder="Перчатки боксёрские Venum" required autofocus>
+    </label>
+
+    <div class="row">
+      <label>
+        <span>Цена, {{ currency }}</span>
+        <input type="text" name="price" inputmode="decimal"
+               value="{{ draft.price or '' }}" placeholder="1200" required>
+      </label>
+      <label>
+        <span>Категория</span>
+        <input type="text" name="category" value="{{ draft.category or '' }}"
+               list="categories" maxlength="50" autocomplete="off">
+        <datalist id="categories">
+          {% for item in categories %}<option value="{{ item }}">{% endfor %}
+        </datalist>
+      </label>
+    </div>
+
+    <label>
+      <span>Описание</span>
+      <textarea name="description" rows="5" maxlength="1000">{{ draft.description or '' }}</textarea>
+    </label>
+
+    <div class="actions">
+      <button class="btn primary" type="submit">Создать</button>
+      <span class="muted small">Товар создаётся скрытым — клиенты увидят его после публикации.</span>
+    </div>
+  </form>
+</section>
+{% endblock %}

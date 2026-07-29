@@ -164,27 +164,78 @@ async def get_product_full(product_id: int) -> dict | None:
         return product
 
 
-async def list_products(
+def _catalog_filters(
     *,
-    category: str | None = None,
-    active_only: bool = False,
-    limit: int = 20,
-    offset: int = 0,
-) -> list[dict]:
-    """Список товаров с суммарным остатком — для админки и веб-CRM."""
+    query: str | None,
+    category: str | None,
+    status: str | None,
+    in_stock: bool | None,
+) -> tuple[list[str], list[Any]]:
+    """Условия отбора товаров для списка в CRM. Таблица products под алиасом p.
+
+    Поиск здесь намеренно строже клиентского (search_products): продавец знает,
+    что ищет, и ждёт от «куртка зимняя» именно зимние куртки, а не всё, где
+    встретилось хоть одно слово. Поэтому AND по словам и никаких ослаблений.
+    """
     where = ["1 = 1"]
     params: list[Any] = []
+
+    for word in (query or "").lower().split():
+        # lower_uni() — потому что встроенный LOWER() кириллицу не трогает.
+        where.append(
+            "(lower_uni(p.title) LIKE ? OR lower_uni(p.description) LIKE ? "
+            "OR lower_uni(p.sku) LIKE ? OR CAST(p.id AS TEXT) = ?)"
+        )
+        params += [f"%{word}%"] * 3 + [word]
+
     if category:
         where.append("p.category = ?")
         params.append(category)
-    if active_only:
+    if status == "active":
         where.append("p.is_active = 1")
+    elif status == "hidden":
+        where.append("p.is_active = 0")
 
+    # «Нет в наличии» — это и товар с нулями по вариантам, и товар, у которого
+    # вариантов вовсе нет: купить нельзя ни тот, ни другой.
+    if in_stock is True:
+        where.append("EXISTS (SELECT 1 FROM product_variants v "
+                     "WHERE v.product_id = p.id AND v.stock > 0)")
+    elif in_stock is False:
+        where.append("NOT EXISTS (SELECT 1 FROM product_variants v "
+                     "WHERE v.product_id = p.id AND v.stock > 0)")
+
+    return where, params
+
+
+async def list_products(
+    *,
+    query: str | None = None,
+    category: str | None = None,
+    status: str | None = None,
+    in_stock: bool | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict]:
+    """Список товаров с суммарным остатком и главным фото — для админки и CRM.
+
+    status: 'active' — только в продаже, 'hidden' — только скрытые, None — все.
+    in_stock: True — есть хоть один вариант в наличии, False — нет ни одного.
+    """
+    where, params = _catalog_filters(
+        query=query, category=category, status=status, in_stock=in_stock
+    )
     async with get_connection() as conn:
         cursor = await conn.execute(
             f"""SELECT p.*,
                        COALESCE((SELECT SUM(stock) FROM product_variants v
-                                 WHERE v.product_id = p.id), 0) AS total_stock
+                                 WHERE v.product_id = p.id), 0) AS total_stock,
+                       (SELECT COUNT(*) FROM product_variants v
+                        WHERE v.product_id = p.id) AS variants_count,
+                       (SELECT id FROM product_photos ph
+                        WHERE ph.product_id = p.id
+                        ORDER BY ph.is_main DESC, ph.sort_order, ph.id
+                        LIMIT 1) AS main_photo_id
                 FROM products p
                 WHERE {' AND '.join(where)}
                 ORDER BY p.sort_order, p.id DESC
@@ -194,19 +245,20 @@ async def list_products(
         return _rows(await cursor.fetchall())
 
 
-async def count_products(*, category: str | None = None, active_only: bool = False) -> int:
+async def count_products(
+    *,
+    query: str | None = None,
+    category: str | None = None,
+    status: str | None = None,
+    in_stock: bool | None = None,
+) -> int:
     """Сколько всего товаров подходит под фильтр — для пагинации."""
-    where = ["1 = 1"]
-    params: list[Any] = []
-    if category:
-        where.append("category = ?")
-        params.append(category)
-    if active_only:
-        where.append("is_active = 1")
-
+    where, params = _catalog_filters(
+        query=query, category=category, status=status, in_stock=in_stock
+    )
     async with get_connection() as conn:
         cursor = await conn.execute(
-            f"SELECT COUNT(*) AS cnt FROM products WHERE {' AND '.join(where)}", params
+            f"SELECT COUNT(*) AS cnt FROM products p WHERE {' AND '.join(where)}", params
         )
         return (await cursor.fetchone())["cnt"]
 
@@ -413,6 +465,19 @@ async def get_categories() -> list[str]:
         return [row["category"] for row in await cursor.fetchall()]
 
 
+async def get_all_categories() -> list[str]:
+    """Все категории каталога, включая те, где все товары скрыты.
+
+    Для фильтра в CRM: продавец ищет в том числе спрятанные товары, и категория
+    не должна пропадать из выпадающего списка оттого, что товар снят с витрины.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT DISTINCT category FROM products WHERE category <> '' ORDER BY category"
+        )
+        return [row["category"] for row in await cursor.fetchall()]
+
+
 # ─────────────────────── Варианты (размер × цвет) ───────────────────────
 
 
@@ -445,6 +510,64 @@ async def set_variant_stock(variant_id: int, stock: int) -> None:
             (max(0, stock), variant_id),
         )
         await conn.commit()
+
+
+async def set_variants_stock(pairs: list[tuple[int, int]]) -> int:
+    """Массовая правка остатков: [(variant_id, stock), ...] за одну транзакцию.
+
+    Одной транзакцией, потому что менеджер правит склад целиком: если половина
+    строк сохранится, а половина нет, он этого не заметит и будет торговать по
+    несуществующим остаткам. Возвращает число реально изменённых строк — по нему
+    страница говорит «сохранено N», а не «сохранено» на пустом действии.
+    """
+    if not pairs:
+        return 0
+
+    changed = 0
+    async with get_connection() as conn:
+        await conn.execute("BEGIN IMMEDIATE")
+        try:
+            for variant_id, stock in pairs:
+                cursor = await conn.execute(
+                    "UPDATE product_variants SET stock = ? WHERE id = ? AND stock <> ?",
+                    (max(0, stock), variant_id, max(0, stock)),
+                )
+                changed += cursor.rowcount
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
+    return changed
+
+
+async def list_stock_rows(
+    *,
+    query: str | None = None,
+    category: str | None = None,
+    status: str | None = None,
+    in_stock: bool | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Варианты всех подходящих товаров одним списком — для правки склада разом.
+
+    Лимит намеренно большой: смысл страницы в том, чтобы поправить три десятка
+    остатков одной формой, а не листать их по восемь штук.
+    """
+    where, params = _catalog_filters(
+        query=query, category=category, status=status, in_stock=in_stock
+    )
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT v.id, v.size, v.color, v.stock,
+                       p.id AS product_id, p.title, p.category, p.is_active, p.price
+                FROM product_variants v
+                JOIN products p ON p.id = v.product_id
+                WHERE {' AND '.join(where)}
+                ORDER BY p.sort_order, p.id DESC, v.size, v.color
+                LIMIT ?""",
+            (*params, limit),
+        )
+        return _rows(await cursor.fetchall())
 
 
 async def delete_variant(variant_id: int) -> None:
@@ -520,6 +643,20 @@ async def get_photo(photo_id: int) -> dict | None:
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
+
+
+async def set_photo_tg_file_id(photo_id: int, tg_file_id: str) -> None:
+    """Запоминает telegram file_id для фото, загруженного в веб-CRM.
+
+    Такое фото сначала лежит только на диске, и бот отправляет его файлом —
+    медленно и заново при каждом показе. После первой отправки Telegram выдаёт
+    file_id, и дальше карточка уходит мгновенно.
+    """
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE product_photos SET tg_file_id = ? WHERE id = ?", (tg_file_id, photo_id)
+        )
+        await conn.commit()
 
 
 async def set_photo_main(photo_id: int) -> int | None:

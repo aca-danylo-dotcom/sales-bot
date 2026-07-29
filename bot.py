@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 
 from aiogram import Bot, Dispatcher
 
@@ -37,6 +38,31 @@ dp.include_router(admin_router)
 # приходят обычным текстом, и клиентский роутер отдал бы их модели.
 dp.include_router(orders_router)
 dp.include_router(client_router)
+
+
+def _stop_on_signals() -> None:
+    """Просит polling завершиться по сигналу остановки от хостинга.
+
+    Обновляя бота, хостинг сначала шлёт процессу SIGTERM и лишь потом убивает
+    его. Без обработчика Python завершается на месте: незакрытыми остаются
+    долгий запрос к Telegram (новый экземпляр упирается в «конфликт getUpdates»
+    и молчит до минуты) и запись в базу. С обработчиком отрабатывает finally —
+    планировщик, панель и сессия бота закрываются по-человечески.
+
+    На Windows добавить обработчик в цикл событий нельзя; там остановка и так
+    приходит как KeyboardInterrupt по Ctrl+C, поэтому просто пропускаем.
+    """
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, lambda s=sig: _ask_stop(s))
+        except (NotImplementedError, AttributeError):
+            return
+
+
+def _ask_stop(sig: "signal.Signals") -> None:
+    logger.info("Получен сигнал %s — останавливаюсь.", sig.name)
+    asyncio.create_task(dp.stop_polling())
 
 
 async def main() -> None:
@@ -68,6 +94,8 @@ async def main() -> None:
     # работать ботом и молча остаться без панели. Бот отдаётся панели, чтобы
     # решения по заказам сразу уходили клиенту в его чат.
     web_runner = await start_web(bot)
+
+    _stop_on_signals()
 
     # skip старых апдейтов, накопившихся пока бот был офлайн
     await bot.delete_webhook(drop_pending_updates=True)

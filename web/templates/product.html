@@ -27,6 +27,16 @@
   </div>
 </div>
 
+{# Одна форма на всю карточку. Она объявлена пустой, а поля разбросаны по
+   секциям и привязаны к ней атрибутом form="card" — так блоки остаются
+   отдельными карточками на вид, но сохраняются разом одной кнопкой, и при
+   этом формы удаления фото и вариантов не оказываются вложенными в неё
+   (вложенные формы браузер молча выбрасывает). #}
+<form id="card" method="post" action="/products/{{ product.id }}"
+      enctype="multipart/form-data">
+  <input type="hidden" name="back" value="{{ back_qs }}">
+</form>
+
 {% if problems is defined and problems %}
 <div class="card problems">
   <p class="strong">Не сохранил:</p>
@@ -36,21 +46,21 @@
 
 <section class="card">
   <h2>Основное</h2>
-  <form class="form" method="post" action="/products/{{ product.id }}">
+  <div class="form">
     <label>
       <span>Название</span>
-      <input type="text" name="title" value="{{ product.title }}" maxlength="120" required>
+      <input form="card" type="text" name="title" value="{{ product.title }}" maxlength="120" required>
     </label>
 
     <div class="row">
       <label>
         <span>Цена, {{ currency }}</span>
-        <input type="text" name="price" inputmode="decimal"
+        <input form="card" type="text" name="price" inputmode="decimal"
                value="{{ raw_price if raw_price is defined else product.price|plain }}" required>
       </label>
       <label>
         <span>Старая цена</span>
-        <input type="text" name="old_price" inputmode="decimal"
+        <input form="card" type="text" name="old_price" inputmode="decimal"
                value="{{ raw_old_price if raw_old_price is defined else product.old_price|plain }}"
                placeholder="если есть скидка">
       </label>
@@ -61,7 +71,7 @@
         <span>Категория</span>
         {# Список-подсказка, но своё значение вписать можно: категории в этом
            магазине не справочник, а привычка продавца. #}
-        <input type="text" name="category" value="{{ product.category }}" list="categories"
+        <input form="card" type="text" name="category" value="{{ product.category }}" list="categories"
                maxlength="50" autocomplete="off">
         <datalist id="categories">
           {% for item in categories %}<option value="{{ item }}">{% endfor %}
@@ -69,24 +79,20 @@
       </label>
       <label>
         <span>Артикул</span>
-        <input type="text" name="sku" value="{{ product.sku or '' }}" maxlength="50">
+        <input form="card" type="text" name="sku" value="{{ product.sku or '' }}" maxlength="50">
       </label>
       <label class="narrow">
         <span>Порядок</span>
-        <input type="text" name="sort_order" inputmode="numeric"
+        <input form="card" type="text" name="sort_order" inputmode="numeric"
                value="{{ product.sort_order }}">
       </label>
     </div>
 
     <label>
       <span>Описание</span>
-      <textarea name="description" rows="5" maxlength="1000">{{ product.description }}</textarea>
+      <textarea form="card" name="description" rows="5" maxlength="1000">{{ product.description }}</textarea>
     </label>
-
-    <div class="actions">
-      <button class="btn primary" type="submit">Сохранить</button>
-    </div>
-  </form>
+  </div>
 </section>
 
 <section class="card">
@@ -95,7 +101,7 @@
     <p class="muted">Вариантов нет — купить товар нельзя. Добавьте хотя бы один.</p>
   {% endif %}
 
-  <form class="form" method="post" action="/products/{{ product.id }}/variants">
+  <div class="form">
     {% if product.variants %}
     <div class="table-wrap">
       <table class="grid">
@@ -104,17 +110,24 @@
         </thead>
         <tbody>
           {% for variant in product.variants %}
+          {% set typed = raw_stock.get(variant.id|string) if raw_stock is defined else none %}
           <tr>
             <td>{{ variant.size or '—' }}</td>
             <td>{{ variant.color or '—' }}</td>
             <td class="num">
-              <input class="stock" type="text" inputmode="numeric"
-                     name="stock_{{ variant.id }}" value="{{ variant.stock }}">
+              <input form="card" class="stock" type="text" inputmode="numeric"
+                     name="stock_{{ variant.id }}"
+                     value="{{ typed if typed is not none else variant.stock }}">
             </td>
             <td class="num">
-              <button class="btn ghost small" type="submit"
-                      name="delete_variant" value="{{ variant.id }}"
-                      onclick="return confirm('Удалить вариант?')">Удалить</button>
+              {# Удаление — своей формой, а не кнопкой общей: иначе Enter в
+                 любом поле карточки отправлял бы её первой кнопкой, то есть
+                 удалял вариант вместо сохранения. #}
+              <form method="post" action="/products/{{ product.id }}/variants"
+                    onsubmit="return confirm('Удалить вариант?')">
+                <input type="hidden" name="delete_variant" value="{{ variant.id }}">
+                <button class="btn ghost small" type="submit">Удалить</button>
+              </form>
             </td>
           </tr>
           {% endfor %}
@@ -126,23 +139,22 @@
     <div class="row new-variant">
       <label>
         <span>Новый размер</span>
-        <input type="text" name="new_size" maxlength="50" placeholder="42 или M">
+        <input form="card" type="text" name="new_size" maxlength="50" placeholder="42 или M"
+               value="{{ raw_new.size if raw_new is defined else '' }}">
       </label>
       <label>
         <span>Цвет</span>
-        <input type="text" name="new_color" maxlength="50" placeholder="чёрный">
+        <input form="card" type="text" name="new_color" maxlength="50" placeholder="чёрный"
+               value="{{ raw_new.color if raw_new is defined else '' }}">
       </label>
       <label class="narrow">
         <span>Остаток</span>
-        <input type="text" name="new_stock" inputmode="numeric" placeholder="0">
+        <input form="card" type="text" name="new_stock" inputmode="numeric" placeholder="0"
+               value="{{ raw_new.stock if raw_new is defined else '' }}">
       </label>
     </div>
-
-    <div class="actions">
-      <button class="btn primary" type="submit">Сохранить остатки</button>
-      <span class="muted small">Заполните нижнюю строку — вариант добавится вместе с сохранением.</span>
-    </div>
-  </form>
+    <p class="muted small">Заполните эту строку — вариант добавится при сохранении.</p>
+  </div>
 </section>
 
 <section class="card">
@@ -173,13 +185,20 @@
     <p class="muted">Фото пока нет. Клиенту такой товар уйдёт текстом.</p>
   {% endif %}
 
-  <form class="form upload" method="post" action="/products/{{ product.id }}/photos"
-        enctype="multipart/form-data">
+  <div class="form upload">
     <label>
       <span>Добавить фото</span>
-      <input type="file" name="photo" accept="image/*" multiple required>
+      <input form="card" type="file" name="photo" accept="image/*" multiple>
     </label>
-    <button class="btn" type="submit">Загрузить</button>
-  </form>
+    <span class="muted small">Файлы загрузятся при сохранении.</span>
+  </div>
 </section>
+
+{# Панель липнет к низу экрана: карточка длинная, и мотать её до кнопки после
+   каждой правки — та самая работа, ради которой панель и заводили. #}
+<div class="actions sticky">
+  <button class="btn primary" form="card" type="submit">Сохранить всё</button>
+  <button class="btn" form="card" type="submit" name="finish" value="1">Готово</button>
+  <span class="muted small">«Готово» сохранит и вернёт в список товаров.</span>
+</div>
 {% endblock %}

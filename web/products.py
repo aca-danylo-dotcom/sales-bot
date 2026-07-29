@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import logging
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 from uuid import uuid4
 
 import aiohttp_jinja2
@@ -55,7 +55,16 @@ ERRORS = {
     "variant_exists": "Такой вариант уже есть — измените остаток в таблице.",
     "stock_bad": "Остаток — целое число от 0. Ничего не сохранил.",
     "not_found": "Товар не найден — возможно, его уже удалили.",
+    # Карточка сохраняется целиком, поэтому осечка в одном блоке не отменяет
+    # остальное — об этом честно говорим, чтобы продавец не сохранял второй раз.
+    "part_variant": "Сохранил, кроме нового варианта: такой уже есть — измените остаток в таблице.",
+    "part_photo": "Сохранил, кроме фото: нужен файл-картинка JPG, PNG или WebP.",
 }
+
+# Что переносим со страницы списка обратно в неё же после сохранения: только
+# известные фильтры, чтобы через скрытое поле формы нельзя было подставить в
+# адрес что угодно.
+BACK_KEYS = ("q", "category", "status", "stock", "page")
 
 # Картинки принимаем по содержимому, а не по имени файла: расширение легко
 # переименовать, а первые байты подделать сложнее. Заодно так узнаём, с каким
@@ -102,6 +111,13 @@ def _filters_qs(request: web.Request) -> str:
     keep = {k: v for k, v in request.query.items()
             if k in ("q", "category", "status", "stock") and v}
     return urlencode(keep)
+
+
+def _back_params(value: object) -> dict[str, str]:
+    """Фильтры списка, приехавшие скрытым полем формы, — только известные ключи."""
+    if not isinstance(value, str) or not value:
+        return {}
+    return {k: v for k, v in parse_qsl(value) if k in BACK_KEYS and v}
 
 
 def _page_context(request: web.Request) -> dict:
@@ -169,7 +185,15 @@ async def product_card(request: web.Request) -> dict:
 
 
 async def product_save(request: web.Request) -> web.Response:
-    """Сохраняет основные поля товара. Ошибку показываем прямо в форме."""
+    """Сохраняет карточку целиком: основное, остатки, новый вариант и фото.
+
+    Раньше блоков было три, у каждого своя кнопка, и заполнивший всё подряд
+    продавец сохранял только тот блок, чью кнопку нажал, — остальное молча
+    терялось. Поэтому поля собраны в одну форму: «Сохранить всё» записывает
+    их разом, «Готово» делает то же и возвращает в список товаров.
+
+    Ошибку показываем прямо в форме — редирект на этом шаге стёр бы набранное.
+    """
     product_id = int(request.match_info["id"])
     product = await queries.get_product_full(product_id)
     if not product:
@@ -179,6 +203,8 @@ async def product_save(request: web.Request) -> web.Response:
     title = forms.text(data, "title", max_len=forms.MAX_TITLE)
     price = forms.price(data.get("price"))
     old_price, old_price_ok = forms.optional_price(data.get("old_price"))
+    pairs, bad_stock = _stock_pairs(data, prefix="stock_")
+    back = _back_params(data.get("back"))
 
     problems = []
     if not title:
@@ -187,6 +213,8 @@ async def product_save(request: web.Request) -> web.Response:
         problems.append("Цена — число больше нуля, например 1200 или 1200,50.")
     if not old_price_ok:
         problems.append("Старую цену либо оставьте пустой, либо введите числом.")
+    if bad_stock:
+        problems.append("Остаток — целое число от 0.")
 
     if problems:
         # Не редиректим: человек только что набрал текст, и терять его нельзя.
@@ -202,6 +230,14 @@ async def product_save(request: web.Request) -> web.Response:
             problems=problems,
             raw_price=data.get("price", ""),
             raw_old_price=data.get("old_price", ""),
+            raw_stock={k[len("stock_"):]: v for k, v in data.items()
+                       if k.startswith("stock_") and isinstance(v, str)},
+            raw_new={
+                "size": forms.text(data, "new_size"),
+                "color": forms.text(data, "new_color"),
+                "stock": data.get("new_stock", "") if isinstance(data.get("new_stock"), str) else "",
+            },
+            back_qs=urlencode(back),
         )
         return aiohttp_jinja2.render_template("product.html", request, context)
 
@@ -215,6 +251,33 @@ async def product_save(request: web.Request) -> web.Response:
         old_price=old_price,
         sort_order=forms.integer(data.get("sort_order"), minimum=-9999, maximum=9999) or 0,
     )
+    await queries.set_variants_stock(pairs)
+
+    # Осечка в новом варианте или в фото не отменяет уже записанное выше:
+    # переспрашивать «сохранить ли остальное» после нажатой кнопки — хуже.
+    err = ""
+    size = forms.text(data, "new_size")
+    color = forms.text(data, "new_color")
+    if size or color or forms.text(data, "new_stock", max_len=10):
+        existing = {(v["size"], v["color"]) for v in await queries.get_variants(product_id)}
+        if (size, color) in existing:
+            err = "part_variant"
+        else:
+            await queries.add_variant(
+                product_id, size=size, color=color,
+                stock=forms.integer(data.get("new_stock")) or 0,
+            )
+
+    photos = [f for f in data.getall("photo", []) if getattr(f, "filename", "")]
+    if photos and not await _store_photos(product_id, photos):
+        err = err or "part_photo"
+
+    # С «Готово» уходим в список — но только если всё прошло гладко: замечание,
+    # показанное на странице, которую человек уже покинул, он не прочитает.
+    if err:
+        _redirect(f"/products/{product_id}", err=err)
+    if forms.text(data, "finish", max_len=4):
+        raise web.HTTPFound(f"/products?{urlencode({**back, 'ok': 'saved'})}")
     _redirect(f"/products/{product_id}", ok="saved")
 
 
@@ -373,17 +436,8 @@ async def stock_save(request: web.Request) -> web.Response:
 # ─────────────────────────── Фото ───────────────────────────
 
 
-async def photo_upload(request: web.Request) -> web.Response:
-    """Загрузка фото товара. Можно выбрать сразу несколько файлов."""
-    product_id = int(request.match_info["id"])
-    if not await queries.get_product(product_id):
-        raise web.HTTPNotFound(text="Товар не найден")
-
-    data = await request.post()
-    fields = [f for f in data.getall("photo", []) if getattr(f, "filename", "")]
-    if not fields:
-        _redirect(f"/products/{product_id}", err="photo_empty")
-
+async def _store_photos(product_id: int, fields) -> int:
+    """Кладёт выбранные файлы на диск и в базу. Возвращает, сколько приняли."""
     saved = 0
     for field in fields:
         content = field.file.read(MAX_PHOTO_BYTES + 1)
@@ -405,7 +459,21 @@ async def photo_upload(request: web.Request) -> web.Response:
             product_id, file_path=file_name, is_main=not existing, sort_order=len(existing)
         )
         saved += 1
+    return saved
 
+
+async def photo_upload(request: web.Request) -> web.Response:
+    """Загрузка фото отдельным запросом — карточка шлёт их вместе с остальным."""
+    product_id = int(request.match_info["id"])
+    if not await queries.get_product(product_id):
+        raise web.HTTPNotFound(text="Товар не найден")
+
+    data = await request.post()
+    fields = [f for f in data.getall("photo", []) if getattr(f, "filename", "")]
+    if not fields:
+        _redirect(f"/products/{product_id}", err="photo_empty")
+
+    saved = await _store_photos(product_id, fields)
     _redirect(f"/products/{product_id}", **({"ok": "photo_added"} if saved
                                             else {"err": "photo_type"}))
 

@@ -43,8 +43,19 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
 async def health(request: web.Request) -> web.Response:
-    """Проверка живости для хостинга — без обращения к базе."""
-    return web.json_response({"status": "ok"})
+    """Проверка живости для хостинга — без обращения к базе.
+
+    Заодно отвечает на вопрос, ради которого иначе пришлось бы лезть в логи
+    сервера: лежит база на постоянном диске или рядом с кодом, где её сотрёт
+    первое же обновление. Путь внутри контейнера — не секрет, а «storage»
+    видно с одного взгляда.
+    """
+    return web.json_response({
+        "status": "ok",
+        "storage": "volume" if config.DB_ON_VOLUME else "ephemeral",
+        "db": str(config.DB_PATH),
+        "media": str(config.MEDIA_DIR),
+    })
 
 
 @web.middleware

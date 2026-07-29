@@ -10,8 +10,10 @@
 Если панель когда-нибудь выйдет наружу, ограничивать доступ придётся снаружи —
 паролем на уровне хостинга, VPN или списком IP.
 
-Раздел «Заказы» приезжает следующей фазой; сейчас работают «Товары», «Склад»
-и главная-заглушка.
+В приложение кладётся сам `bot` (`app["bot"]`): раздел «Заказы» не только меняет
+статусы, но и пишет клиенту в его чат — подтверждение оплаты, накладную, отмену.
+Без бота панель работает, но такие сообщения не уходят, и менеджер видит об этом
+предупреждение.
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ from aiohttp import web
 
 import config
 from services import format
-from web import forms, products
+from web import forms, orders, products
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +72,11 @@ async def same_origin_only(request: web.Request, handler):
     return await handler(request)
 
 
-def create_app() -> web.Application:
+def create_app(bot=None) -> web.Application:
     app = web.Application(
         client_max_size=MAX_UPLOAD_BYTES, middlewares=[same_origin_only]
     )
+    app["bot"] = bot
     aiohttp_jinja2.setup(
         app,
         loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
@@ -91,13 +94,14 @@ def create_app() -> web.Application:
     app.router.add_get("/health", health)
     app.router.add_get("/", index)
     products.setup_routes(app)
+    orders.setup_routes(app)
     app.router.add_static("/static/", STATIC_DIR, name="static")
     return app
 
 
-async def start_web() -> web.AppRunner:
+async def start_web(bot=None) -> web.AppRunner:
     """Поднимает CRM рядом с polling'ом бота."""
-    runner = web.AppRunner(create_app())
+    runner = web.AppRunner(create_app(bot))
     await runner.setup()
     site = web.TCPSite(runner, config.WEB_HOST, config.WEB_PORT)
     await site.start()

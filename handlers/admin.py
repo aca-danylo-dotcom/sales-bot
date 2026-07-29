@@ -60,9 +60,12 @@ from keyboards.admin import (
     variants_kb,
 )
 from keyboards.orders import CB_ADMIN_NO, CB_ADMIN_OK
-from handlers.orders import notify_client, order_items_text
+from handlers.orders import (
+    client_confirmed_text,
+    client_payment_missing_text,
+    notify_client,
+)
 from services import media
-from services.format import money
 
 logger = logging.getLogger(__name__)
 
@@ -780,13 +783,7 @@ async def order_confirm(callback: CallbackQuery, bot: Bot) -> None:
         return
 
     await queries.set_order_status(order_id, "confirmed")
-    delivered = await notify_client(
-        bot,
-        order["client_id"],
-        f"✅ Оплата по заказу №{order_id} получена, спасибо!\n\n"
-        f"{order_items_text(order)}\n\n"
-        f"Собираем заказ и отправляем Новой Почтой — номер накладной пришлём сюда же.",
-    )
+    delivered = await notify_client(bot, order["client_id"], client_confirmed_text(order))
 
     note = "✅ <b>Оплата подтверждена</b>"
     if not delivered:
@@ -811,11 +808,7 @@ async def order_reject(callback: CallbackQuery, bot: Bot) -> None:
         return
 
     delivered = await notify_client(
-        bot,
-        order["client_id"],
-        f"К сожалению, оплату по заказу №{order_id} на {money(order['total'])} "
-        f"мы не нашли, поэтому заказ отменён — товар вернулся на витрину.\n\n"
-        f"Если оплата всё-таки прошла, напишите сюда: разберёмся и оформим заново 🙏",
+        bot, order["client_id"], client_payment_missing_text(order)
     )
 
     note = "❌ <b>Заказ отклонён, товар вернулся на склад</b>"

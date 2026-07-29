@@ -59,8 +59,9 @@ async def main() -> None:
     scheduler = setup_scheduler(bot)
 
     # Веб-CRM поднимаем до polling: если порт занят, честнее упасть сразу, чем
-    # работать ботом и молча остаться без панели.
-    web_runner = await start_web()
+    # работать ботом и молча остаться без панели. Бот отдаётся панели, чтобы
+    # решения по заказам сразу уходили клиенту в его чат.
+    web_runner = await start_web(bot)
 
     # skip старых апдейтов, накопившихся пока бот был офлайн
     await bot.delete_webhook(drop_pending_updates=True)

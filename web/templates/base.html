@@ -12,9 +12,9 @@
   <nav>
     {% set active = section|default('') %}
     <a href="/" class="{{ 'active' if active == 'index' }}">Сводка</a>
+    <a href="/orders" class="{{ 'active' if active == 'orders' }}">Заказы</a>
     <a href="/products" class="{{ 'active' if active == 'products' }}">Товары</a>
     <a href="/stock" class="{{ 'active' if active == 'stock' }}">Склад</a>
-    <span class="soon" title="Появится в следующей фазе">Заказы</span>
   </nav>
 </header>
 
@@ -22,6 +22,9 @@
   {# Результат последнего действия: код приезжает в адресе, текст берётся из
      словаря на сервере — подсунуть в строку своё сообщение нельзя. #}
   {% if message %}<p class="flash ok">{{ message }}</p>{% endif %}
+  {# Предупреждение — это «сделано, но с оговоркой»: заказ отправлен, а сообщение
+     клиенту не дошло. Прятать такое в успех нельзя, объявлять ошибкой — тоже. #}
+  {% if warning %}<p class="flash warn">{{ warning }}</p>{% endif %}
   {% if error %}<p class="flash err">{{ error }}</p>{% endif %}
   {% block content %}{% endblock %}
 </main>

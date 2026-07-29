@@ -1016,32 +1016,153 @@ async def get_client_orders(client_id: int, limit: int = 10) -> list[dict]:
         return _rows(await cursor.fetchall())
 
 
-async def list_orders(
+async def get_order_full(order_id: int) -> dict | None:
+    """Заказ целиком для карточки менеджера: позиции, фото, склад, клиент.
+
+    Отличие от get_order — то, что нужно человеку перед отправкой посылки:
+    к каждой позиции подтягиваются главное фото и сегодняшний остаток
+    варианта (его видно, когда заказ отменяют: товар вернётся именно туда),
+    а к заказу — телефон и город из профиля клиента.
+
+    Название, размер и цена берутся ИЗ ЗАКАЗА, а не из каталога: товар мог
+    подорожать или быть переименован после покупки, а в накладной должно
+    остаться то, что человек заказывал.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        order = dict(row)
+
+        cursor = await conn.execute(
+            """SELECT oi.*,
+                      v.product_id,
+                      v.stock            AS stock_now,
+                      (SELECT id FROM product_photos ph
+                       WHERE ph.product_id = v.product_id
+                       ORDER BY ph.is_main DESC, ph.sort_order, ph.id
+                       LIMIT 1)          AS photo_id
+               FROM order_items oi
+               LEFT JOIN product_variants v ON v.id = oi.variant_id
+               WHERE oi.order_id = ?
+               ORDER BY oi.id""",
+            (order_id,),
+        )
+        order["items"] = _rows(await cursor.fetchall())
+        for item in order["items"]:
+            item["sum"] = round(item["price_snapshot"] * item["qty"], 2)
+
+        cursor = await conn.execute(
+            "SELECT * FROM clients WHERE telegram_id = ?", (order["client_id"],)
+        )
+        client = await cursor.fetchone()
+        order["client"] = dict(client) if client else None
+        return order
+
+
+def _order_filters(
     *,
-    status: str | None = None,
-    search: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> list[dict]:
-    """Список заказов для CRM: фильтр по статусу и поиск по имени/телефону/ТТН."""
+    status: str | None,
+    search: str | None,
+    date_from: str | None,
+    date_to: str | None,
+) -> tuple[list[str], list[Any]]:
+    """Условия отбора заказов. Одни и те же для списка и для счётчика страниц.
+
+    Даты сравниваем по date(created_at): в базе лежит момент с точностью до
+    секунды, и «заказы за сегодня» иначе обрывались бы на полуночи в обе стороны.
+    """
     where = ["1 = 1"]
     params: list[Any] = []
+
     if status:
         where.append("status = ?")
         params.append(status)
     if search:
+        # Менеджер ищет по тому, что у него перед глазами: номер заказа из
+        # переписки, фамилия на посылке, телефон или номер накладной.
         where.append("(lower_uni(name) LIKE ? OR phone LIKE ? OR ttn LIKE ? "
                      "OR CAST(id AS TEXT) = ?)")
         like = f"%{search.lower()}%"
         params += [like, like, like, search]
+    if date_from:
+        where.append("date(created_at) >= date(?)")
+        params.append(date_from)
+    if date_to:
+        where.append("date(created_at) <= date(?)")
+        params.append(date_to)
 
+    return where, params
+
+
+async def list_orders(
+    *,
+    status: str | None = None,
+    search: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Список заказов для CRM: статус, период, поиск по имени/телефону/ТТН/номеру."""
+    where, params = _order_filters(
+        status=status, search=search, date_from=date_from, date_to=date_to
+    )
     async with get_connection() as conn:
         cursor = await conn.execute(
-            f"""SELECT * FROM orders WHERE {' AND '.join(where)}
-                ORDER BY id DESC LIMIT ? OFFSET ?""",
+            f"""SELECT orders.*,
+                       (SELECT COUNT(*) FROM order_items oi
+                        WHERE oi.order_id = orders.id)             AS items_count,
+                       COALESCE((SELECT SUM(qty) FROM order_items oi
+                                 WHERE oi.order_id = orders.id), 0) AS units_count
+                FROM orders
+                WHERE {' AND '.join(where)}
+                ORDER BY orders.id DESC LIMIT ? OFFSET ?""",
             (*params, limit, offset),
         )
         return _rows(await cursor.fetchall())
+
+
+async def count_orders(
+    *,
+    status: str | None = None,
+    search: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> int:
+    """Сколько заказов подходит под фильтр — для пагинации."""
+    where, params = _order_filters(
+        status=status, search=search, date_from=date_from, date_to=date_to
+    )
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"SELECT COUNT(*) AS cnt FROM orders WHERE {' AND '.join(where)}", params
+        )
+        return (await cursor.fetchone())["cnt"]
+
+
+async def count_orders_by_status(
+    *,
+    search: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, int]:
+    """Сколько заказов в каждом статусе — цифры на вкладках списка.
+
+    Считаем одним запросом с теми же фильтрами, кроме самого статуса: вкладка
+    должна показывать, сколько там окажется заказов при текущем поиске и периоде.
+    """
+    where, params = _order_filters(
+        status=None, search=search, date_from=date_from, date_to=date_to
+    )
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT status, COUNT(*) AS cnt FROM orders
+                WHERE {' AND '.join(where)} GROUP BY status""",
+            params,
+        )
+        return {row["status"]: row["cnt"] for row in await cursor.fetchall()}
 
 
 async def set_order_status(order_id: int, status: str) -> None:
@@ -1066,6 +1187,74 @@ async def set_order_status(order_id: int, status: str) -> None:
             await conn.execute(
                 "UPDATE orders SET status = ? WHERE id = ?", (status, order_id)
             )
+        await conn.commit()
+
+
+async def advance_order_status(
+    order_id: int, status: str, *, allowed_from: tuple[str, ...]
+) -> bool:
+    """Меняет статус, только если заказ сейчас в одном из ожидаемых состояний.
+
+    True — переход состоялся, False — заказ уже не там, где думал нажимавший.
+    Проверка живёт внутри UPDATE, а не отдельным SELECT: панель открыта у
+    нескольких человек сразу, и между «прочитали статус» и «записали новый»
+    заказ успел бы уехать. Иначе второй менеджер отправил бы клиенту второе
+    «оплата получена» по уже отгруженному заказу.
+
+    Отмена сюда не входит: она возвращает товар на склад, для неё cancel_order.
+    """
+    stamp_column = {
+        "paid_claimed": "paid_at",
+        "confirmed": "confirmed_at",
+        "shipped": "shipped_at",
+    }.get(status)
+    placeholders = ", ".join("?" for _ in allowed_from)
+
+    async with get_connection() as conn:
+        stamp = f", {stamp_column} = ?" if stamp_column else ""
+        params: list[Any] = [status]
+        if stamp_column:
+            params.append(config.now_str())
+        params += [order_id, *allowed_from]
+        cursor = await conn.execute(
+            f"UPDATE orders SET status = ?{stamp} "
+            f"WHERE id = ? AND status IN ({placeholders})",
+            params,
+        )
+        await conn.commit()
+        return cursor.rowcount > 0
+
+
+async def take_order(order_id: int, assignee: str) -> tuple[bool, str | None]:
+    """Менеджер берёт заказ в работу. Возвращает (получилось ли, кто ведёт сейчас).
+
+    Захват идёт одним UPDATE со свободным assignee: если заказ уже ведёт
+    коллега, второй менеджер получит False и его имя — вместо того чтобы
+    молча перебить подпись и вдвоём звонить одному клиенту.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "UPDATE orders SET assignee = ? "
+            "WHERE id = ? AND (assignee IS NULL OR assignee = '' OR assignee = ?)",
+            (assignee, order_id, assignee),
+        )
+        await conn.commit()
+        if cursor.rowcount > 0:
+            return True, assignee
+
+        cursor = await conn.execute(
+            "SELECT assignee FROM orders WHERE id = ?", (order_id,)
+        )
+        row = await cursor.fetchone()
+        return False, row["assignee"] if row else None
+
+
+async def release_order(order_id: int) -> None:
+    """Снимает ответственного — заказ снова свободен для любого менеджера."""
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE orders SET assignee = NULL WHERE id = ?", (order_id,)
+        )
         await conn.commit()
 
 
@@ -1130,14 +1319,28 @@ async def cancel_order(order_id: int, *, note: str | None = None) -> bool:
             raise
 
 
-async def set_order_ttn(order_id: int, ttn: str) -> None:
-    """Записывает накладную и переводит заказ в 'shipped'."""
+# Из этих состояний посылку осмысленно отправлять. 'shipped' в списке нарочно:
+# накладную часто вводят с опечаткой и исправляют следующим действием.
+SHIPPABLE_STATUSES = ("awaiting_payment", "paid_claimed", "confirmed", "shipped")
+
+
+async def set_order_ttn(
+    order_id: int, ttn: str, *, allowed_from: tuple[str, ...] = SHIPPABLE_STATUSES
+) -> bool:
+    """Записывает накладную и переводит заказ в 'shipped'. False — заказ не в том статусе.
+
+    Отменённый заказ накладную не получит: условие статуса стоит в самом UPDATE,
+    иначе отменённый и уже вернувшийся на склад товар «уехал» бы клиенту.
+    """
+    placeholders = ", ".join("?" for _ in allowed_from)
     async with get_connection() as conn:
-        await conn.execute(
-            "UPDATE orders SET ttn = ?, status = 'shipped', shipped_at = ? WHERE id = ?",
-            (ttn, config.now_str(), order_id),
+        cursor = await conn.execute(
+            f"UPDATE orders SET ttn = ?, status = 'shipped', shipped_at = ? "
+            f"WHERE id = ? AND status IN ({placeholders})",
+            (ttn, config.now_str(), order_id, *allowed_from),
         )
         await conn.commit()
+        return cursor.rowcount > 0
 
 
 async def set_order_fields(order_id: int, **fields: Any) -> None:

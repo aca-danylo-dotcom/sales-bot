@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Mapping
 
 # Длины полей: обрезаем, а не отклоняем — терять уже набранный текст обиднее,
@@ -110,3 +111,17 @@ def plain_number(value: object) -> str:
 def status_filter(value: object) -> str | None:
     """Фильтр видимости: 'active' / 'hidden' / без фильтра."""
     return value if value in ("active", "hidden") else None
+
+
+def date_value(value: object) -> str | None:
+    """Дата из поля <input type="date"> → «2026-07-29». Мусор — None.
+
+    Проверяем разбором, а не длиной строки: в адрес легко подставить
+    «2026-13-40» или кусок SQL, а в запрос дата уходит как есть.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value.strip()).isoformat()
+    except ValueError:
+        return None

@@ -18,7 +18,7 @@ from aiogram import Bot, Dispatcher
 
 import config
 from db.database import init_db
-from services import agent_stats
+from services import agent_stats, sheets
 from services.jobs import setup_scheduler
 from handlers.admin import router as admin_router
 from handlers.client import router as client_router
@@ -57,6 +57,12 @@ async def main() -> None:
     # Планировщик поднимаем до polling: он возвращает на склад товар из
     # заказов, которые так и не оплатили.
     scheduler = setup_scheduler(bot)
+
+    # Разовая выгрузка при старте: пока бот лежал, заказы могли закрывать и
+    # склад править в панели, а следующий прогон по расписанию — через десять
+    # минут. Ждём её здесь, а не в фоне: прогон один, ошибку он не выбрасывает,
+    # зато в логе сразу видно, работает настройка таблицы или нет.
+    await sheets.sync_to_sheets()
 
     # Веб-CRM поднимаем до polling: если порт занят, честнее упасть сразу, чем
     # работать ботом и молча остаться без панели. Бот отдаётся панели, чтобы

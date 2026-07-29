@@ -16,6 +16,7 @@ import json
 from dataclasses import dataclass, field
 
 from db import queries
+from services import agent_stats
 from services.format import ORDER_STATUS_RU  # noqa: F401 — используется ниже и в хендлерах
 
 # Сколько карточек с фото отправляем за один ответ. Больше — это уже спам в чат
@@ -355,6 +356,16 @@ def build_executor(ctx: ClientContext):
                           "color": variant["color"]})
 
         ctx.cart_changed = True
+        # Та же цель, что у кнопки в handlers/orders.py, но с source='ai': в
+        # дашборде видно, сколько корзин собрал разговор, а сколько — каталог.
+        agent_stats.report_goal(
+            "cart_add",
+            client_id,
+            variant_id=int(variant_id),
+            title=variant["title"],
+            qty=qty,
+            source="ai",
+        )
         cart = await queries.get_cart(client_id)
         return _dump({
             "status": "ok",

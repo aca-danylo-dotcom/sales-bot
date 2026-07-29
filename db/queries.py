@@ -1455,6 +1455,71 @@ async def count_zero_stock() -> int:
         return (await cursor.fetchone())["cnt"]
 
 
+# ─────────────────────── Выгрузка в Google Sheets ───────────────────────
+
+
+async def get_orders_export(limit: int = 5000) -> list[dict]:
+    """Заказы со списком позиций — лист «Заказы».
+
+    Позиции берём вторым запросом и склеиваем в Python, а не GROUP_CONCAT в SQL:
+    порядок строк внутри GROUP_CONCAT в SQLite не определён, и состав заказа
+    в таблице каждый раз перемешивался бы. Плюс формат ячейки остаётся делом
+    services/sheets.py, а не базы.
+
+    Лимит — защита от бесконечно растущего запроса: в один POST в Apps Script
+    больше нескольких тысяч строк класть незачем, а магазин с такой историей
+    сначала упрётся в другое.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT o.*, c.telegram_id AS client_telegram_id
+               FROM orders o
+               LEFT JOIN clients c ON c.telegram_id = o.client_id
+               ORDER BY o.id DESC LIMIT ?""",
+            (limit,),
+        )
+        orders = _rows(await cursor.fetchall())
+        if not orders:
+            return []
+
+        placeholders = ",".join("?" for _ in orders)
+        cursor = await conn.execute(
+            f"""SELECT order_id, title_snapshot, size, color, price_snapshot, qty
+                FROM order_items
+                WHERE order_id IN ({placeholders})
+                ORDER BY id""",
+            [o["id"] for o in orders],
+        )
+        by_order: dict[int, list[dict]] = {}
+        for item in _rows(await cursor.fetchall()):
+            by_order.setdefault(item["order_id"], []).append(item)
+
+        for order in orders:
+            order["items"] = by_order.get(order["id"], [])
+        return orders
+
+
+async def get_stock_export(limit: int = 5000) -> list[dict]:
+    """Все варианты всех товаров — лист «Остатки».
+
+    Скрытые товары тоже здесь: склад — это то, что лежит на полке, независимо
+    от того, показан товар клиенту или снят с витрины. Витринность отдельной
+    колонкой, чтобы её было видно.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT v.id, v.size, v.color, v.stock, v.sku AS variant_sku,
+                      p.id AS product_id, p.title, p.category, p.price,
+                      p.sku AS product_sku, p.is_active
+               FROM product_variants v
+               JOIN products p ON p.id = v.product_id
+               ORDER BY p.sort_order, p.id, v.size, v.color
+               LIMIT ?""",
+            (limit,),
+        )
+        return _rows(await cursor.fetchall())
+
+
 # ─────────────────────── История диалога ───────────────────────
 
 

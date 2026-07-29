@@ -65,7 +65,7 @@ from handlers.orders import (
     client_payment_missing_text,
     notify_client,
 )
-from services import media
+from services import agent_stats, media
 
 logger = logging.getLogger(__name__)
 
@@ -783,6 +783,15 @@ async def order_confirm(callback: CallbackQuery, bot: Bot) -> None:
         return
 
     await queries.set_order_status(order_id, "confirmed")
+    # Цель считаем по подтверждению, а не по кнопке клиента «Я оплатил»: там
+    # только его слово, а деньги на счету — здесь.
+    agent_stats.report_goal(
+        "order_paid",
+        order["client_id"],
+        order_id=order_id,
+        total=order["total"],
+        source="telegram",
+    )
     delivered = await notify_client(bot, order["client_id"], client_confirmed_text(order))
 
     note = "✅ <b>Оплата подтверждена</b>"

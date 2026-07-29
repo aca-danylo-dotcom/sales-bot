@@ -35,6 +35,7 @@ from handlers.orders import (
     client_shipped_text,
     notify_client,
 )
+from services import agent_stats
 from services.format import ORDER_STATUS_RU
 from web import forms
 
@@ -262,6 +263,15 @@ async def order_confirm(request: web.Request) -> web.Response:
     if not moved:
         _redirect(f"/orders/{order['id']}", err="status")
 
+    # Цель — только после состоявшегося перехода: повторное нажатие по
+    # устаревшей странице выходит выше и второй «оплаченный заказ» не рисует.
+    agent_stats.report_goal(
+        "order_paid",
+        order["client_id"],
+        order_id=order["id"],
+        total=order["total"],
+        source="crm",
+    )
     delivered = await _notify(request, order["client_id"], client_confirmed_text(order))
     _result(order["id"], "confirmed", delivered)
 

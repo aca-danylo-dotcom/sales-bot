@@ -1,6 +1,6 @@
 """Фоновые задачи бота.
 
-Их две.
+Их три.
 
 1. Отмена заказов, которые так и не оплатили. Нужна не ради порядка в таблице,
    а ради склада — `queries.create_order` списывает остатки сразу, и брошенный
@@ -12,6 +12,11 @@
 2. Напоминание о брошенной корзине — РОВНО одно на корзину. Второе письмо в тот
    же чат превращает магазин в спамера: однократность держится на поле
    `carts.reminded_at`, а не на памяти процесса, поэтому переживает рестарт.
+
+3. Выгрузка заказов и остатков в Google Sheets — по расписанию, потому что
+   таблицу владелец открывает когда захочет, а не после каждого заказа. Задача
+   ставится, только если выгрузка настроена (`sheets.is_enabled()`): иначе
+   планировщик каждые десять минут писал бы в лог, что она выключена.
 """
 from __future__ import annotations
 
@@ -24,6 +29,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import config
 from db import queries
 from keyboards.orders import added_kb
+from services import sheets
 from services.format import money, variant_label
 
 logger = logging.getLogger(__name__)
@@ -40,6 +46,10 @@ _CART_CHECK_INTERVAL_MINUTES = 30
 # Проверка просто пропускается — корзина никуда не денется, напомним утром.
 _QUIET_FROM_HOUR = 22
 _QUIET_TO_HOUR = 9
+
+# Раз в десять минут: таблицу смотрят глазами, и «данные десятиминутной
+# давности» там никого не подводят, а чаще дёргать чужой сервис незачем.
+_SHEETS_SYNC_MINUTES = 10
 
 
 async def cancel_expired_orders(bot: Bot) -> int:
@@ -191,15 +201,26 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         coalesce=True,
         misfire_grace_time=3600,
     )
+    if sheets.is_enabled():
+        scheduler.add_job(
+            sheets.sync_to_sheets,
+            "interval",
+            minutes=_SHEETS_SYNC_MINUTES,
+            id="sync_google_sheets",
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
     scheduler.start()
     logger.info(
         "Планировщик запущен: отмена неоплаченных заказов старше %s ч (раз в %s мин), "
-        "напоминание о корзине после %s ч простоя (раз в %s мин, кроме %s:00–%s:00)",
+        "напоминание о корзине после %s ч простоя (раз в %s мин, кроме %s:00–%s:00), "
+        "выгрузка в Google Sheets — %s",
         config.ORDER_PAYMENT_TIMEOUT_HOURS,
         _CHECK_INTERVAL_MINUTES,
         config.CART_REMINDER_HOURS,
         _CART_CHECK_INTERVAL_MINUTES,
         _QUIET_FROM_HOUR,
         _QUIET_TO_HOUR,
+        f"раз в {_SHEETS_SYNC_MINUTES} мин" if sheets.is_enabled() else "выключена",
     )
     return scheduler

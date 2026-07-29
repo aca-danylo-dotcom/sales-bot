@@ -56,6 +56,7 @@ from keyboards.orders import (
     summary_kb,
     variants_pick_kb,
 )
+from services import agent_stats
 from services.format import ORDER_STATUS_RU, money, variant_label
 
 logger = logging.getLogger(__name__)
@@ -402,6 +403,18 @@ async def add_to_cart(callback: CallbackQuery) -> None:
         await callback.answer("Не получилось добавить товар", show_alert=True)
         return
 
+    # Цель для дашборда агентства: положили товар в корзину. Считаем здесь, а
+    # не в queries.add_to_cart, потому что цель — про действие человека, а
+    # функцию базы дёргают ещё и правки количества.
+    agent_stats.report_goal(
+        "cart_add",
+        callback.from_user.id,
+        variant_id=variant_id,
+        title=variant["title"],
+        qty=1,
+        source="button",
+    )
+
     cart = await queries.get_cart(callback.from_user.id)
     await callback.message.answer(
         f"✅ В корзине: {_esc(variant['title'])} — {_esc(variant_label(variant))}\n\n"
@@ -691,6 +704,9 @@ async def checkout_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot)
     await state.clear()
 
     order = await queries.get_order(order_id)
+    agent_stats.report_goal(
+        "order_created", client_id, order_id=order_id, total=order["total"]
+    )
     await callback.message.answer(
         f"Спасибо! Заказ №{order_id} принят.", reply_markup=main_menu()
     )

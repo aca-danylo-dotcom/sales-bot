@@ -1375,6 +1375,86 @@ async def get_expired_unpaid_orders(hours: int) -> list[dict]:
         return _rows(await cursor.fetchall())
 
 
+# ─────────────────────────── Сводка ───────────────────────────
+# Цифры для главной страницы CRM. Считаются теми же условиями, что и списки:
+# нажав на цифру, менеджер должен увидеть ровно те заказы, которые в ней учтены.
+
+
+async def orders_summary(
+    *, date_from: str | None = None, date_to: str | None = None
+) -> dict:
+    """Сколько заказов за период и на какую сумму.
+
+    Отменённые считаются отдельно и в выручку не идут: товар вернулся на склад,
+    денег не было. Показывать их в сумме — значит рисовать день лучше, чем он был.
+    """
+    where, params = _order_filters(
+        status=None, search=None, date_from=date_from, date_to=date_to
+    )
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT
+                    COUNT(*)                                                   AS total,
+                    COALESCE(SUM(status <> 'cancelled'), 0)                    AS live,
+                    COALESCE(SUM(status = 'cancelled'), 0)                     AS cancelled,
+                    COALESCE(SUM(CASE WHEN status <> 'cancelled'
+                                      THEN total ELSE 0 END), 0)               AS revenue,
+                    COALESCE(SUM(CASE WHEN status IN ('confirmed', 'shipped', 'done')
+                                      THEN total ELSE 0 END), 0)               AS paid_revenue
+                FROM orders
+                WHERE {' AND '.join(where)}""",
+            params,
+        )
+        return dict(await cursor.fetchone())
+
+
+async def count_stale_shipped(days: int) -> int:
+    """Отправленные заказы, которые никто не закрыл дольше указанного срока.
+
+    Обычно это значит, что посылку уже забрали, а статус остался: заказ висит в
+    «отправлен» и мешает видеть настоящую работу.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT COUNT(*) AS cnt FROM orders
+               WHERE status = 'shipped'
+                 AND shipped_at IS NOT NULL
+                 AND datetime(shipped_at) < datetime(?, ?)""",
+            (config.now_str(), f"-{days} days"),
+        )
+        return (await cursor.fetchone())["cnt"]
+
+
+async def zero_stock_variants(*, limit: int = 10) -> list[dict]:
+    """Что закончилось на складе: варианты с нулём у товаров, которые видит клиент.
+
+    Скрытые товары не берём — их всё равно никто не купит, и в сводке они были бы
+    просто шумом.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT v.id, v.size, v.color, p.id AS product_id, p.title, p.category
+               FROM product_variants v
+               JOIN products p ON p.id = v.product_id
+               WHERE v.stock <= 0 AND p.is_active = 1
+               ORDER BY p.sort_order, p.id DESC, v.size, v.color
+               LIMIT ?""",
+            (limit,),
+        )
+        return _rows(await cursor.fetchall())
+
+
+async def count_zero_stock() -> int:
+    """Сколько всего вариантов кончилось — чтобы понять, влез ли список целиком."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT COUNT(*) AS cnt FROM product_variants v
+               JOIN products p ON p.id = v.product_id
+               WHERE v.stock <= 0 AND p.is_active = 1"""
+        )
+        return (await cursor.fetchone())["cnt"]
+
+
 # ─────────────────────── История диалога ───────────────────────
 
 

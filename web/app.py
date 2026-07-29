@@ -27,7 +27,7 @@ from aiohttp import web
 
 import config
 from services import format
-from web import forms, orders, products
+from web import forms, orders, products, summary
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +40,6 @@ STATIC_DIR = BASE_DIR / "static"
 # с телефона целиком, поэтому поднимаем его до размера, в который влезает
 # несколько снимков; отдельный файл всё равно ограничен в web/products.py.
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
-
-
-@aiohttp_jinja2.template("index.html")
-async def index(request: web.Request) -> dict:
-    return {"shop_name": config.SHOP_NAME, "section": "index"}
 
 
 async def health(request: web.Request) -> web.Response:
@@ -88,11 +83,12 @@ def create_app(bot=None) -> web.Application:
         filters={
             "money": format.money,
             "variant": format.variant_label,
+            "plural": format.plural,
             "plain": forms.plain_number,
         },
     )
     app.router.add_get("/health", health)
-    app.router.add_get("/", index)
+    summary.setup_routes(app)
     products.setup_routes(app)
     orders.setup_routes(app)
     app.router.add_static("/static/", STATIC_DIR, name="static")

@@ -17,6 +17,20 @@ def money(value: float) -> str:
     return f"{text.replace(',', ' ')} {config.SHOP_CURRENCY}"
 
 
+def plural(count: int, one: str, few: str, many: str) -> str:
+    """Русское склонение после числа: 1 заказ, 2 заказа, 5 заказов.
+
+    Нужно там, где число подставляется в текст: «3 заказов» на видном месте
+    читается как небрежность, будто цифру никто не смотрел.
+    """
+    tail, hundred = count % 10, count % 100
+    if tail == 1 and hundred != 11:
+        return one
+    if 2 <= tail <= 4 and not 12 <= hundred <= 14:
+        return few
+    return many
+
+
 def variant_label(variant: dict) -> str:
     """«12 oz / чёрный», «42», «чёрный» — то из размера и цвета, что заполнено."""
     parts = [part for part in (variant.get("size"), variant.get("color")) if part]

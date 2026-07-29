@@ -2,16 +2,68 @@
 {% block title %}Сводка — {{ shop_name }}{% endblock %}
 
 {% block content %}
-<h1>{{ shop_name }}</h1>
-<p class="lead">Панель управления магазином.</p>
+<div class="head">
+  <div>
+    <h1>Сводка</h1>
+    <p class="lead">{{ today }} · {{ shop_name }}</p>
+  </div>
+</div>
+
+{# Цифры кликабельны: каждая ведёт в «Заказы» с тем же периодом, из которого
+   посчитана, — чтобы «пять заказов» всегда можно было увидеть поимённо. #}
+<div class="metrics">
+  {% for m in metrics %}
+  <a class="metric" href="{{ m.href }}">
+    <span class="metric-title">{{ m.title }}</span>
+    <span class="metric-value">{{ m.revenue|money }}</span>
+    <span class="metric-sub">
+      {{ m.live }} {{ m.live|plural('заказ', 'заказа', 'заказов') }}
+      {%- if m.cancelled %}, отменено {{ m.cancelled }}{% endif %}
+    </span>
+    <span class="metric-hint">{{ m.hint }}</span>
+  </a>
+  {% endfor %}
+</div>
 
 <div class="card">
-  <h2>Разделы</h2>
-  <p class="links">
-    <a href="/orders">Заказы</a> — подтверждение оплаты, накладные, отмена, переписка клиента.<br>
-    <a href="/products">Товары</a> — карточки, цены, фото, публикация.<br>
-    <a href="/stock">Склад</a> — остатки по размерам и цветам одной таблицей.
+  <h2>Требует внимания</h2>
+  {% if attention %}
+  <ul class="attention">
+    {% for row in attention %}
+    <li class="{{ 'urgent' if row.urgent }}">
+      <a class="attention-count" href="{{ row.href }}">{{ row.count }}</a>
+      <span class="attention-main">
+        <a href="{{ row.href }}">{{ row.title }}</a>
+        <span class="muted small">{{ row.hint }}{% if row.link_hint %} · {{ row.link_hint }}{% endif %}</span>
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Всё разобрано: ни одного заказа, который ждёт человека.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Закончилось на складе</h2>
+  {% if zero_stock %}
+  <p class="muted small">Товары на витрине, у которых нет ни одной штуки. Клиент их видит, но купить не может.</p>
+  <ul class="zero-stock">
+    {% for v in zero_stock %}
+    <li>
+      <a href="/products/{{ v.product_id }}">{{ v.title }}</a>
+      <span class="muted small">{{ v|variant or 'без вариантов' }}{% if v.category %} · {{ v.category }}{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="actions">
+    <a class="btn" href="/stock?status=active">Пополнить остатки</a>
+    {% if zero_stock_total > zero_stock_limit %}
+      <span class="muted small">показаны {{ zero_stock_limit }} из {{ zero_stock_total }}</span>
+    {% endif %}
   </p>
-  <p class="muted">Следом на этой странице появятся цифры за день.</p>
+  {% else %}
+  <p class="muted">Пусто: у всех товаров на витрине что-то есть на складе.</p>
+  {% endif %}
 </div>
 {% endblock %}

@@ -132,6 +132,73 @@ h2 {
 .flash.warn { background: #fff6e8; color: #8a5a00; }
 .flash.err { background: #fff4f4; color: var(--danger); }
 
+/* ─── Сводка ─── */
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 22px 24px;
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text);
+}
+.metric:hover { text-decoration: none; background: #fbfbfd; }
+
+.metric-title { font-size: 13px; color: var(--muted); }
+.metric-value {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.metric-sub { font-size: 14px; }
+.metric-hint { font-size: 12px; color: var(--muted); }
+
+/* Список дел. Цифра слева крупная и сама по себе ссылка: по ней и попадают в
+   отфильтрованный список, не целясь в подпись. */
+.attention { list-style: none; margin: 0; padding: 0; }
+
+.attention li {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.attention li:last-child { border-bottom: none; }
+
+.attention-count {
+  min-width: 46px;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.attention-count:hover { text-decoration: none; opacity: 0.7; }
+.attention li.urgent .attention-count { color: var(--danger); }
+
+.attention-main { display: flex; flex-direction: column; gap: 2px; }
+
+.zero-stock { list-style: none; margin: 14px 0 18px; padding: 0; }
+
+.zero-stock li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.zero-stock li:last-child { border-bottom: none; }
+
 /* ─── Кнопки ─── */
 
 .btn {

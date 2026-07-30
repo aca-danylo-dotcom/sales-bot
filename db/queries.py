@@ -559,7 +559,11 @@ async def list_stock_rows(
     async with get_connection() as conn:
         cursor = await conn.execute(
             f"""SELECT v.id, v.size, v.color, v.stock,
-                       p.id AS product_id, p.title, p.category, p.is_active, p.price
+                       p.id AS product_id, p.title, p.category, p.is_active, p.price,
+                       (SELECT id FROM product_photos ph
+                        WHERE ph.product_id = p.id
+                        ORDER BY ph.is_main DESC, ph.sort_order, ph.id
+                        LIMIT 1) AS main_photo_id
                 FROM product_variants v
                 JOIN products p ON p.id = v.product_id
                 WHERE {' AND '.join(where)}

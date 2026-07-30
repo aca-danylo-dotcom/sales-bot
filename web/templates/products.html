@@ -10,6 +10,13 @@
   <a class="btn primary" href="/products/new">Новый товар</a>
 </div>
 
+{# Два вида одних и тех же товаров. Отбор переносим в ссылку: переключил вид —
+   остался при том же фильтре, а не вернулся к полному списку. #}
+<nav class="tabs">
+  <a class="on" href="/products{% if filters_qs %}?{{ filters_qs }}{% endif %}">Список товаров</a>
+  <a href="/products/stock{% if filters_qs %}?{{ filters_qs }}{% endif %}">Остатки по размерам</a>
+</nav>
+
 {# Фильтры — обычная GET-форма: то, что видно на экране, всегда совпадает с
    адресом, и такую ссылку можно сохранить или отправить коллеге. #}
 <form class="filters card" method="get" action="/products">

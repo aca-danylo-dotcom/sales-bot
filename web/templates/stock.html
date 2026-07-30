@@ -1,15 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Склад — {{ shop_name }}{% endblock %}
+{% block title %}Остатки — {{ shop_name }}{% endblock %}
 
 {% block content %}
 <div class="head">
   <div>
-    <h1>Склад</h1>
+    <h1>Товары</h1>
     <p class="lead">Все размеры и цвета одной таблицей: правьте сколько нужно и сохраните разом.</p>
   </div>
+  <a class="btn primary" href="/products/new">Новый товар</a>
 </div>
 
-<form class="filters card" method="get" action="/stock">
+<nav class="tabs">
+  <a href="/products{% if filters_qs %}?{{ filters_qs }}{% endif %}">Список товаров</a>
+  <a class="on" href="/products/stock{% if filters_qs %}?{{ filters_qs }}{% endif %}">Остатки по размерам</a>
+</nav>
+
+<form class="filters card" method="get" action="/products/stock">
   <input type="search" name="q" value="{{ q }}" placeholder="Название, артикул или id"
          autocomplete="off">
   <select name="category">
@@ -29,17 +35,18 @@
     <option value="out" {{ 'selected' if stock == 'out' }}>Закончились</option>
   </select>
   <button class="btn" type="submit">Показать</button>
-  {% if filters_qs %}<a class="btn ghost" href="/stock">Сбросить</a>{% endif %}
+  {% if filters_qs %}<a class="btn ghost" href="/products/stock">Сбросить</a>{% endif %}
 </form>
 
 {% if rows %}
 {# Фильтры уезжают в адрес формы: после сохранения человек должен вернуться
    к тому же отбору, а не к полному списку склада. #}
-<form method="post" action="/stock{% if filters_qs %}?{{ filters_qs }}{% endif %}">
+<form method="post" action="/products/stock{% if filters_qs %}?{{ filters_qs }}{% endif %}">
   <div class="card table-wrap">
     <table class="grid">
       <thead>
         <tr>
+          <th class="thumb-col"></th>
           <th>Товар</th>
           <th>Вариант</th>
           <th class="num">Цена</th>
@@ -49,6 +56,13 @@
       <tbody>
         {% for row in rows %}
         <tr>
+          <td class="thumb-col">
+            {% if row.main_photo_id %}
+              <img class="thumb" src="/media/{{ row.main_photo_id }}" alt="" loading="lazy">
+            {% else %}
+              <span class="thumb empty">—</span>
+            {% endif %}
+          </td>
           <td>
             <a class="strong" href="/products/{{ row.product_id }}">{{ row.title }}</a>
             <span class="muted small">

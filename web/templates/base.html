@@ -13,8 +13,9 @@
     {% set active = section|default('') %}
     <a href="/" class="{{ 'active' if active == 'index' }}">Сводка</a>
     <a href="/orders" class="{{ 'active' if active == 'orders' }}">Заказы</a>
+    {# Остатки — не отдельный раздел, а второй вид «Товаров»: те же товары,
+       только таблицей размеров. Переключатель стоит на самой странице. #}
     <a href="/products" class="{{ 'active' if active == 'products' }}">Товары</a>
-    <a href="/stock" class="{{ 'active' if active == 'stock' }}">Склад</a>
   </nav>
 </header>
 

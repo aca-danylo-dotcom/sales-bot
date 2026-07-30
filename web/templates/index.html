@@ -57,7 +57,7 @@
     {% endfor %}
   </ul>
   <p class="actions">
-    <a class="btn" href="/stock?status=active">Пополнить остатки</a>
+    <a class="btn" href="/products/stock?status=active">Пополнить остатки</a>
     {% if zero_stock_total > zero_stock_limit %}
       <span class="muted small">показаны {{ zero_stock_limit }} из {{ zero_stock_total }}</span>
     {% endif %}

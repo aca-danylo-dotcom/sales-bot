@@ -496,12 +496,16 @@ def _stock_pairs(data, *, prefix: str) -> tuple[list[tuple[int, int]], bool]:
 
 @aiohttp_jinja2.template("stock.html")
 async def stock_page(request: web.Request) -> dict:
-    """Все варианты подходящих товаров одной таблицей — правка склада разом."""
+    """Все варианты подходящих товаров одной таблицей — правка остатков разом.
+
+    Живёт внутри раздела «Товары» второй вкладкой: это те же товары, только
+    вид другой — не карточки, а остатки по размерам.
+    """
     filters = _filters(request)
     rows = await queries.list_stock_rows(**filters)
     return {
         **_page_context(request),
-        "section": "stock",
+        "section": "products",
         "rows": rows,
         "categories": await queries.get_all_categories(),
         "filters_qs": _filters_qs(request),
@@ -518,9 +522,15 @@ async def stock_save(request: web.Request) -> web.Response:
     qs = _filters_qs(request)
     tail = f"&{qs}" if qs else ""
     if bad:
-        raise web.HTTPFound(f"/stock?err=stock_bad{tail}")
+        raise web.HTTPFound(f"/products/stock?err=stock_bad{tail}")
     changed = await queries.set_variants_stock(pairs)
-    raise web.HTTPFound(f"/stock?ok={'stock' if changed else 'stock_none'}{tail}")
+    raise web.HTTPFound(f"/products/stock?ok={'stock' if changed else 'stock_none'}{tail}")
+
+
+async def stock_moved(request: web.Request) -> web.Response:
+    """Старый адрес /stock: раздел переехал в «Товары», а закладки остались."""
+    tail = f"?{request.query_string}" if request.query_string else ""
+    raise web.HTTPFound("/products/stock" + tail)
 
 
 # ─────────────────────────── Фото ───────────────────────────
@@ -620,6 +630,10 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_get("/products", products_list)
     app.router.add_get("/products/new", product_new_form)
     app.router.add_post("/products/new", product_create)
+    # Остатки — вторая вкладка «Товаров». Стоит выше маршрутов с {id:\d+},
+    # так что с номерами товаров не спорит.
+    app.router.add_get("/products/stock", stock_page)
+    app.router.add_post("/products/stock", stock_save)
     app.router.add_get(r"/products/{id:\d+}", product_card)
     app.router.add_post(r"/products/{id:\d+}", product_save)
     app.router.add_post(r"/products/{id:\d+}/variants", variants_save)
@@ -628,6 +642,5 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post(r"/products/{id:\d+}/photos", photo_upload)
     app.router.add_post(r"/photos/{id:\d+}/main", photo_main)
     app.router.add_post(r"/photos/{id:\d+}/delete", photo_delete)
-    app.router.add_get("/stock", stock_page)
-    app.router.add_post("/stock", stock_save)
+    app.router.add_get("/stock", stock_moved)
     app.router.add_get(r"/media/{id:\d+}", photo_file)

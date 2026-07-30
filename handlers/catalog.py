@@ -36,6 +36,47 @@ logger = logging.getLogger(__name__)
 router = Router(name="catalog")
 
 
+# Просьба показать каталог, написанная словами. Кнопка внизу экрана есть, но
+# половина покупателей просто пишет «а что у вас есть» — и такая реплика уходила
+# модели, а та по инструкции отправляла клиента к кнопке. Одно и то же сообщение
+# в ответ на живой вопрос выглядит как отписка, поэтому короткие просьбы про
+# каталог открывают тот же экран категорий, что и кнопка.
+#
+# Ловим осторожно: фраза должна состоять ТОЛЬКО из слов про каталог и служебных
+# слов. «Есть перчатки 42?» — уже конкретный запрос, его ищет ИИ инструментом.
+_CATALOG_WORDS = frozenset({
+    "каталог", "каталоге", "каталогом", "ассортимент", "асортимент",
+    "товар", "товары", "товаров", "товари", "вещи", "речі",
+    "есть", "є", "наличии", "наявності", "продаете", "продаєте",
+})
+
+_FILLER_WORDS = frozenset({
+    "что", "чего", "шо", "що", "какие", "какой", "как", "а", "и", "у", "в",
+    "вас", "тебя", "ваш", "ваши", "весь", "все", "вся", "всі", "мне", "можно",
+    "хочу", "хотел", "хотела", "покажи", "покажите", "показать", "покажеш",
+    "посмотреть", "поглянути", "глянуть", "список", "пожалуйста", "плиз",
+    "там", "ну", "давай", "интересно", "цікаво",
+})
+
+
+def _is_catalog_request(text: str | None) -> bool:
+    """Просьба показать каталог целиком — или всё же конкретный запрос?
+
+    Считаем каталогом только фразу, в которой есть слово про каталог и нет ни
+    одного «своего» слова: любое лишнее слово («перчатки», «размер 42») значит,
+    что человек ищет конкретное, — такое отдаём ИИ, он умеет искать.
+    """
+    clean = (text or "").lower().replace("ё", "е")
+    words = [word.strip("«»\"'()") for word in clean.replace("?", " ").replace("!", " ")
+             .replace(",", " ").replace(".", " ").split()]
+    words = [word for word in words if word]
+    if not words or len(words) > 6:
+        return False
+    if not any(word in _CATALOG_WORDS for word in words):
+        return False
+    return all(word in _CATALOG_WORDS or word in _FILLER_WORDS for word in words)
+
+
 async def _categories_view() -> tuple[str, object | None]:
     """Текст и кнопки первого экрана каталога."""
     categories = await queries.get_categories()
@@ -91,6 +132,7 @@ async def _replace(callback: CallbackQuery, text: str, markup) -> None:
 
 
 @router.message(StateFilter(None), F.text == BTN_CATALOG)
+@router.message(StateFilter(None), F.text.func(_is_catalog_request))
 async def open_catalog(message: Message) -> None:
     await queries.ensure_client(message.from_user.id)
     text, markup = await _categories_view()

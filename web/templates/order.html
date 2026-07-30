@@ -76,7 +76,12 @@
         {% endif %}
       </div>
 
-      {% if can_ship %}
+      {% if can_ship and not order.assignee %}
+      {# Пока заказ не взят, поле накладной не показываем: отправку подписывают
+         именем, и заполнять номер, который всё равно не сохранится, — зря. #}
+      <p class="muted">Чтобы отметить отправку, сначала возьмите заказ в работу —
+        имя вписывается вверху страницы.</p>
+      {% elif can_ship %}
       <form class="form ttn" method="post" action="/orders/{{ order.id }}/ship">
         <label>
           <span>Номер накладной Новой Почты</span>
@@ -85,7 +90,8 @@
         </label>
         <div class="actions">
           <button class="btn primary" type="submit">Отправлено, сообщить клиенту</button>
-          <span class="muted small">Клиенту уйдёт сообщение с этим номером.</span>
+          <span class="muted small">Отправку записываем на вас: {{ order.assignee }}.
+            Клиенту уйдёт сообщение с номером накладной.</span>
         </div>
       </form>
       {% elif order.ttn %}

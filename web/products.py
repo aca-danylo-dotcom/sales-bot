@@ -76,9 +76,14 @@ ERRORS = {
 }
 
 # Сколько пустых строк «размер / цвет / остаток» показывать на странице
-# создания. Три — обычная вилка обуви или перчаток на первый заход; не хватило —
-# остальные добавляются в карточке по одной.
+# создания при первом заходе. Строк может стать больше: кнопка «Ещё размер»
+# добавляет их прямо на странице, и сервер читает столько, сколько прислали.
 NEW_VARIANT_ROWS = 3
+
+# Предел на число строк в одной отправке. Не про удобство, а про защиту: без
+# него подделанная форма с полями new_size_999999 заставила бы сервер крутить
+# пустой цикл. Тридцать размеров за один заход — с запасом.
+MAX_VARIANT_ROWS = 30
 
 # Что переносим со страницы списка обратно в неё же после сохранения: только
 # известные фильтры, чтобы через скрытое поле формы нельзя было подставить в
@@ -328,16 +333,29 @@ def _draft_rows(data=None) -> list[dict[str, str]]:
     """Строки «размер / цвет / остаток» страницы создания — как их набрали.
 
     Без data — пустой бланк для первого показа формы.
+
+    Число строк не фиксировано: кнопка «Ещё размер» дописывает их на странице,
+    поэтому читаем столько, сколько пришло, а не заранее известные три. Считаем
+    по номерам в именах полей (new_size_0, new_size_1, …): браузер присылает их
+    подряд, но полагаться на это незачем — берём наибольший номер и ограничиваем
+    его MAX_VARIANT_ROWS.
     """
     if data is None:
         return [{"size": "", "color": "", "stock": ""} for _ in range(NEW_VARIANT_ROWS)]
+
+    numbers = set()
+    for key in data.keys():
+        for prefix in ("new_size_", "new_color_", "new_stock_"):
+            if key.startswith(prefix) and key[len(prefix):].isdigit():
+                numbers.add(int(key[len(prefix):]))
+    count = min(max(numbers) + 1, MAX_VARIANT_ROWS) if numbers else NEW_VARIANT_ROWS
     return [
         {
             "size": forms.text(data, f"new_size_{i}"),
             "color": forms.text(data, f"new_color_{i}"),
             "stock": forms.text(data, f"new_stock_{i}", max_len=10),
         }
-        for i in range(NEW_VARIANT_ROWS)
+        for i in range(count)
     ]
 
 
@@ -375,6 +393,7 @@ async def _new_context(request: web.Request, **extra) -> dict:
         "categories": sorted(set(CATEGORIES) | set(await queries.get_all_categories())),
         "draft": {},
         "rows": _draft_rows(),
+        "max_variant_rows": MAX_VARIANT_ROWS,
         "problems": [],
         "had_photos": False,
         **extra,

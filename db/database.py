@@ -192,6 +192,9 @@ _ADDED_INDEXES: list[str] = [
     # «Сохранить» и повторная отправка формы не плодят копии одной картинки.
     "CREATE INDEX IF NOT EXISTS idx_photos_hash "
     "ON product_photos(product_id, content_hash)",
+    # По нему сводка «закончилось на складе» проверяет, продавался ли размер
+    # раньше: без индекса каждый нулевой размер перебирал бы все позиции заказов.
+    "CREATE INDEX IF NOT EXISTS idx_order_items_variant ON order_items(variant_id)",
 ]
 
 
@@ -205,6 +208,20 @@ async def _add_missing_columns(conn: aiosqlite.Connection) -> None:
 
     for statement in _ADDED_INDEXES:
         await conn.execute(statement)
+
+
+async def _normalize_categories(conn: aiosqlite.Connection) -> None:
+    """Приводит уже сохранённые категории к нижнему регистру.
+
+    Новые записываются нормализованными (queries.normalize_category), но в базе
+    к этому моменту лежат и «Одежда» с автозаглавной, и «одежда» из кнопки бота —
+    для фильтров это две разные категории. Запрос идемпотентный: на второй раз
+    он не находит ни одной строки и ничего не делает.
+    """
+    await conn.execute(
+        "UPDATE products SET category = lower_uni(category) "
+        "WHERE category IS NOT NULL AND category <> lower_uni(category)"
+    )
 
 
 def _lower_uni(value: str | None) -> str | None:
@@ -283,4 +300,5 @@ async def init_db() -> None:
             await conn.execute("PRAGMA journal_mode = WAL")
         await conn.executescript(_SCHEMA)
         await _add_missing_columns(conn)
+        await _normalize_categories(conn)
         await conn.commit()

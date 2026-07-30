@@ -134,4 +134,46 @@
     var inputs = document.querySelectorAll('input[type=file][multiple]');
     Array.prototype.forEach.call(inputs, setupPicker);
   }
+
+  /* --- Ещё строка размера на странице создания товара ---
+
+     Строк было ровно три, и четвёртый размер приходилось дозаполнять уже в
+     карточке — то есть заводить товар в два захода. Кнопка копирует последнюю
+     строку и перенумеровывает поля; сервер читает столько строк, сколько пришло. */
+
+  var rowsBox = document.getElementById("variant-rows");
+  var addWrap = document.getElementById("add-variant-wrap");
+  var addButton = document.getElementById("add-variant");
+
+  if (rowsBox && addWrap && addButton) {
+    var limit = parseInt(rowsBox.dataset.max, 10) || 30;
+    addWrap.hidden = false;
+
+    addButton.addEventListener("click", function () {
+      var rows = rowsBox.querySelectorAll(".new-variant");
+      if (!rows.length || rows.length >= limit) return;
+
+      var index = rows.length;
+      var row = rows[rows.length - 1].cloneNode(true);
+
+      Array.prototype.forEach.call(row.querySelectorAll("input"), function (field) {
+        /* Имя вида new_size_2 → new_size_3: номер в конце и есть номер строки. */
+        field.name = field.name.replace(/\d+$/, index);
+        field.value = "";
+        var label = field.getAttribute("aria-label");
+        if (label) field.setAttribute("aria-label", label.replace(/\d+$/, index + 1));
+      });
+      /* Подписи «Размер / Цвет / Остаток» стоят только над первой строкой —
+         в копии их быть не должно, иначе они повторятся посреди таблицы. */
+      Array.prototype.forEach.call(row.querySelectorAll("label > span"), function (caption) {
+        caption.remove();
+      });
+
+      rowsBox.appendChild(row);
+      var first = row.querySelector("input");
+      if (first) first.focus();
+
+      if (rows.length + 1 >= limit) addButton.disabled = true;
+    });
+  }
 })();

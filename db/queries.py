@@ -75,6 +75,18 @@ async def update_client(
 # ─────────────────────────── Товары ───────────────────────────
 
 
+def normalize_category(value: str | None) -> str:
+    """Категория — всегда маленькими буквами и без лишних пробелов.
+
+    Категории сравниваются точной строкой (фильтры, кнопки каталога), поэтому
+    «Одежда», набранная с телефона с автозаглавной, и «одежда» из кнопки бота
+    оказывались двумя разными категориями: в списке они дублировались, а фильтр
+    показывал половину товаров. Приводим к одному виду при записи — и в CRM,
+    и в боте, потому что путь у обоих через эти функции.
+    """
+    return " ".join((value or "").split()).lower()
+
+
 async def create_product(
     title: str,
     price: float,
@@ -91,7 +103,7 @@ async def create_product(
             """INSERT INTO products
                    (sku, title, description, category, price, old_price, sort_order, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (sku, title, description, category, price, old_price, sort_order,
+            (sku, title, description, normalize_category(category), price, old_price, sort_order,
              config.now_str()),
         )
         await conn.commit()
@@ -105,6 +117,8 @@ async def update_product(product_id: int, **fields: Any) -> None:
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return
+    if "category" in updates:
+        updates["category"] = normalize_category(updates["category"])
 
     sets = ", ".join(f"{k} = ?" for k in updates)
     async with get_connection() as conn:
@@ -1449,18 +1463,26 @@ async def count_stale_shipped(days: int) -> int:
         return (await cursor.fetchone())["cnt"]
 
 
+# Размер попадает в сводку «закончилось», только если по нему была хотя бы одна
+# продажа. «Закончилось» и «столько не завозили» — разные вещи: заводя товар,
+# продавец ставит 0 тем размерам, которых пока нет, и сводка тут же писала, что
+# товар кончился. Продажа в прошлом — как раз признак того, что размер был и его
+# разобрали: такой стоит пополнить, о таком и предупреждаем.
+_SOLD_BEFORE = "EXISTS (SELECT 1 FROM order_items oi WHERE oi.variant_id = v.id)"
+
+
 async def zero_stock_variants(*, limit: int = 10) -> list[dict]:
-    """Что закончилось на складе: варианты с нулём у товаров, которые видит клиент.
+    """Что закончилось на складе: размеры с нулём у товаров, которые видит клиент.
 
     Скрытые товары не берём — их всё равно никто не купит, и в сводке они были бы
-    просто шумом.
+    просто шумом. Размеры, которых ни разу не продавали, тоже: см. _SOLD_BEFORE.
     """
     async with get_connection() as conn:
         cursor = await conn.execute(
-            """SELECT v.id, v.size, v.color, p.id AS product_id, p.title, p.category
+            f"""SELECT v.id, v.size, v.color, p.id AS product_id, p.title, p.category
                FROM product_variants v
                JOIN products p ON p.id = v.product_id
-               WHERE v.stock <= 0 AND p.is_active = 1
+               WHERE v.stock <= 0 AND p.is_active = 1 AND {_SOLD_BEFORE}
                ORDER BY p.sort_order, p.id DESC, v.size, v.color
                LIMIT ?""",
             (limit,),
@@ -1469,12 +1491,12 @@ async def zero_stock_variants(*, limit: int = 10) -> list[dict]:
 
 
 async def count_zero_stock() -> int:
-    """Сколько всего вариантов кончилось — чтобы понять, влез ли список целиком."""
+    """Сколько всего размеров кончилось — чтобы понять, влез ли список целиком."""
     async with get_connection() as conn:
         cursor = await conn.execute(
-            """SELECT COUNT(*) AS cnt FROM product_variants v
+            f"""SELECT COUNT(*) AS cnt FROM product_variants v
                JOIN products p ON p.id = v.product_id
-               WHERE v.stock <= 0 AND p.is_active = 1"""
+               WHERE v.stock <= 0 AND p.is_active = 1 AND {_SOLD_BEFORE}"""
         )
         return (await cursor.fetchone())["cnt"]
 

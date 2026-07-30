@@ -44,14 +44,25 @@ router = Router(name="catalog")
 #
 # Ловим осторожно: фраза должна состоять ТОЛЬКО из слов про каталог и служебных
 # слов. «Есть перчатки 42?» — уже конкретный запрос, его ищет ИИ инструментом.
+#
+# Слова ниже однозначны сами по себе: их достаточно, чтобы открыть категории.
 _CATALOG_WORDS = frozenset({
     "каталог", "каталоге", "каталогом", "ассортимент", "асортимент",
     "товар", "товары", "товаров", "товари", "вещи", "речі",
+})
+
+# А эти говорят только про наличие и каталог сами по себе НЕ значат. «Есть в
+# наличии?» — вопрос про товар, карточку которого клиент видит перед собой:
+# меню категорий в ответ и есть то самое «отвечает не по делу». Поэтому они
+# работают лишь вместе с вопросительным словом: «что у вас есть».
+_STOCK_WORDS = frozenset({
     "есть", "є", "наличии", "наявності", "продаете", "продаєте",
 })
 
+_ASK_WORDS = frozenset({"что", "чего", "шо", "що", "какие", "какой"})
+
 _FILLER_WORDS = frozenset({
-    "что", "чего", "шо", "що", "какие", "какой", "как", "а", "и", "у", "в",
+    "как", "а", "и", "у", "в",
     "вас", "тебя", "ваш", "ваши", "весь", "все", "вся", "всі", "мне", "можно",
     "хочу", "хотел", "хотела", "покажи", "покажите", "показать", "покажеш",
     "посмотреть", "поглянути", "глянуть", "список", "пожалуйста", "плиз",
@@ -72,9 +83,14 @@ def _is_catalog_request(text: str | None) -> bool:
     words = [word for word in words if word]
     if not words or len(words) > 6:
         return False
-    if not any(word in _CATALOG_WORDS for word in words):
+    known = _CATALOG_WORDS | _STOCK_WORDS | _ASK_WORDS | _FILLER_WORDS
+    if any(word not in known for word in words):
         return False
-    return all(word in _CATALOG_WORDS or word in _FILLER_WORDS for word in words)
+    if any(word in _CATALOG_WORDS for word in words):
+        return True
+    # Осталось только про наличие: «что есть» — каталог, «есть в наличии?» — нет.
+    return (any(word in _STOCK_WORDS for word in words)
+            and any(word in _ASK_WORDS for word in words))
 
 
 async def _categories_view() -> tuple[str, object | None]:

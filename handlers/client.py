@@ -13,7 +13,7 @@ import asyncio
 import logging
 import re
 import time
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timezone
 
 from aiogram import Bot, F, Router
@@ -87,6 +87,13 @@ def _should_warn(user_id: int) -> bool:
 
 # Ведущий маркер строки: кружочек/звёздочка/дефис-список, заголовок #, цитата >.
 _MARKER_RE = re.compile(r"^(\s*)(?:[•*\-]\s+|#{1,6}\s+|>\s+)")
+
+# Слова названия товара, чтобы понять, назвал ли его бот в ответе. Цифры внутри
+# слова оставляем: «12 oz» и «Air Zoom 2» — часть названия.
+_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+
+# Слова, которые сами по себе товар не опознают: они есть в половине названий.
+_TITLE_STOP_WORDS = frozenset({"для", "від", "или", "под", "про", "the", "and", "with"})
 
 
 def _clean_markup(text: str) -> str:
@@ -219,7 +226,7 @@ async def _run_and_reply(message: Message, bot: Bot) -> None:
         await queries.add_message(user_id, "assistant", reply)
         await queries.trim_history(user_id, _KEEP_HISTORY)
 
-    await _send_cards(message, ctx)
+    await _send_cards(message, ctx, reply)
 
     # Обращение закрыл бот. started_at — когда клиент отправил сообщение, так что
     # во «время ответа» попадает и ожидание на блокировке пользователя.
@@ -242,18 +249,67 @@ def _report_escalated(message: Message, user_id: int) -> None:
     )
 
 
-async def _send_cards(message: Message, ctx: ClientContext) -> None:
+def _title_words(title: str) -> list[str]:
+    """Значимые слова названия, каждое по одному разу и в порядке названия."""
+    return [
+        word for word in dict.fromkeys(_WORD_RE.findall(title.lower()))
+        if len(word) >= 3 and word not in _TITLE_STOP_WORDS
+    ]
+
+
+def _mentioned_positions(titles: dict[int, str], reply: str) -> dict[int, int]:
+    """Какие товары консультант назвал в ответе и в каком месте — {id: позиция}.
+
+    Поиск в каталоге нарочно ослабляет фильтры, поэтому на «давай посмотрим
+    ботинки» он возвращает и боксёрские перчатки. Раньше фото уходило по всему,
+    что вернул поиск, — клиент просил ботинки, а получал объявление с
+    перчатками. Теперь карточка уходит только по товару, который назван в тексте.
+
+    Сверяем по словам, а не по строке целиком: в базе «Чоловічі кросівки для
+    бігу Adidas Adizero SL2», а бот пишет «Adidas Adizero SL2». Товар считаем
+    названным, если в ответе нашлись два его слова — или хотя бы одно, которого
+    нет в названиях других найденных товаров («adizero», «venum»): такое слово
+    ни с чем не спутать. А общее «кросівки» при двух моделях в выдаче за
+    название не сходит — иначе уедут обе карточки вместо одной.
+    """
+    words = {pid: _title_words(title) for pid, title in titles.items()}
+    across = Counter(word for title_words in words.values() for word in title_words)
+    reply_words = _WORD_RE.findall(reply.lower())
+
+    positions: dict[int, int] = {}
+    for pid, title_words in words.items():
+        found = [(reply_words.index(word), word) for word in title_words
+                 if word in reply_words]
+        if not found:
+            continue
+        distinctive = any(across[word] == 1 for _, word in found)
+        if len(found) >= 2 or distinctive or len(title_words) == 1:
+            positions[pid] = min(index for index, _ in found)
+    return positions
+
+
+async def _send_cards(message: Message, ctx: ClientContext, reply: str) -> None:
     """Досылает фото товаров, о которых консультант рассказал в этом ответе.
 
     Инструменты фото не отправляют (модель их не видит) — они лишь помечают
     товары в ctx.show_products, а список хранит каждый товар один раз, поэтому
     в одном ответе одна и та же карточка не задваивается.
 
+    Порядок карточек — как в ответе: клиент читает «есть кроссовки и перчатки» и
+    ниже видит их в том же порядке.
+
     Сама карточка живёт в services/cards.py: её же показывает каталог по
     кнопке, и выглядеть они обязаны одинаково.
     """
-    for product_id in ctx.show_products[:MAX_CARDS]:
+    products: dict[int, dict] = {}
+    for product_id in ctx.show_products:
         product = await queries.get_product_full(product_id)
-        if not product or not product["is_active"]:
-            continue
-        await send_product_card(message, product)
+        if product and product["is_active"]:
+            products[product_id] = product
+
+    positions = _mentioned_positions(
+        {pid: product["title"] for pid, product in products.items()}, reply
+    )
+    ordered = sorted(positions.items(), key=lambda item: item[1])
+    for product_id, _ in ordered[:MAX_CARDS]:
+        await send_product_card(message, products[product_id])

@@ -62,7 +62,7 @@ from keyboards.orders import (
     variants_pick_kb,
 )
 from services import agent_stats
-from services.format import ORDER_STATUS_RU, money, variant_label
+from services.format import ORDER_STATUS_RU, looks_like_name, money, variant_label
 
 logger = logging.getLogger(__name__)
 router = Router(name="orders")
@@ -92,6 +92,10 @@ _PHONE_CLEAN_RE = re.compile(r"[^\d+]")
 # Без цифры это не адрес доставки, а фраза вроде «как обычно» или «на твоё
 # усмотрение» — по такой строке посылку не отправить, поэтому переспрашиваем.
 _BRANCH_DIGIT_RE = re.compile(r"\d")
+
+# Сколько раз переспрашиваем имя, прежде чем принять как есть: проверка не знает
+# всех имён на свете, и упереться на первом шаге хуже, чем странное имя в заказе.
+_MAX_NAME_ATTEMPTS = 3
 
 
 def _esc(value: object) -> str:
@@ -247,9 +251,8 @@ def payment_text(order: dict) -> str:
     )
 
 
-# Заголовки пушей владельцу. Один и тот же заказ приходит дважды — при
-# оформлении и когда клиент сказал, что оплатил, — поэтому по первой строке
-# должно быть сразу видно, что именно случилось.
+# Заголовки пушей владельцу. Полный разбор заказа приходит один раз — при
+# оформлении; про оплату уходит короткая строка (см. admin_order_text).
 _ADMIN_HEADERS = {
     "new": ("🆕 <b>Новый заказ №{id}</b>",
             "Реквизиты клиенту отправлены, ждём оплату."),
@@ -260,9 +263,21 @@ _ADMIN_HEADERS = {
 
 def admin_order_text(order: dict, username: str | None = None,
                      kind: str = "paid") -> str:
-    """Пуш владельцу: состав, сумма и контакты одним сообщением."""
+    """Пуш владельцу о заказе.
+
+    Состав, сумма и контакты — только в пуше при оформлении. Про оплату уходит
+    короткое сообщение: раньше оно повторяло тот же разбор целиком, и в чате
+    висели два почти одинаковых сообщения об одном заказе.
+    """
     header, hint = _ADMIN_HEADERS[kind]
     contact = f"@{username}" if username else f"id {order['client_id']}"
+    if kind == "paid":
+        return "\n".join([
+            header.format(id=order["id"]),
+            f"Сумма: <b>{money(order['total'])}</b> · {_esc(order['name'])}, "
+            f"{_esc(order['phone'])}",
+            hint,
+        ])
     lines = [
         header.format(id=order["id"]),
         hint,
@@ -558,6 +573,10 @@ async def _start_checkout(message: Message, state: FSMContext, client_id: int) -
     # предлагаем его кнопкой «Оставить», пусть человек напишет сам.
     if profile["np_branch"] and not _BRANCH_DIGIT_RE.search(profile["np_branch"]):
         profile["np_branch"] = ""
+    # То же и с именем: в профиле может лежать ник или отговорка из давнего
+    # разговора — кнопкой «Оставить» такое подставлять нельзя.
+    if profile["name"] and not looks_like_name(profile["name"]):
+        profile["name"] = ""
 
     await state.set_data({"profile": profile})
     await _ask(message, state, "name")
@@ -678,6 +697,20 @@ async def step_text(message: Message, state: FSMContext) -> None:
             "например «12», «№7» или «Поштомат 4521»."
         )
         return
+
+    if field == "name" and not looks_like_name(text):
+        # Не упираемся: после двух переспросов принимаем что дали. Иначе человек с
+        # именем, которое проверка не узнала, застрянет на первом же шаге и уйдёт
+        # без заказа — а имя владелец всегда может поправить в CRM.
+        attempts = (await state.get_data()).get("name_attempts", 0) + 1
+        await state.update_data(name_attempts=attempts)
+        if attempts < _MAX_NAME_ATTEMPTS:
+            await message.answer(
+                "Похоже, это не имя 🙂 Курьер будет искать получателя по нему, "
+                "поэтому напишите имя и фамилию — например «Анна Ковальчук»."
+            )
+            return
+        logger.info("Имя получателя принято без проверки после %s попыток", attempts)
 
     await _accept(message, state, field, text[:high])
 

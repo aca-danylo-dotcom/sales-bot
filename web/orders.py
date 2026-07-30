@@ -101,8 +101,14 @@ ERRORS = {
     "taken": "Заказ уже взял другой менеджер — обновите страницу, там видно, кто именно.",
     "manager_empty": "Впишите своё имя — оно останется на заказе.",
     "cancel_twice": "Заказ уже был отменён, второй раз товар не вернётся.",
+    "cancel_closed": "Заказ уже выполнен — отменить его нельзя. Если товар вернули, "
+                     "заведите остаток вручную во вкладке «Остатки».",
     "not_found": "Заказ не найден.",
 }
+
+# Статусы, из которых отмена уже не имеет смысла: выполненный заказ забрали,
+# отменённый отменён.
+_CANCEL_CLOSED = ("done", "cancelled")
 
 
 def _redirect(location: str, **params: str) -> web.HTTPFound:
@@ -235,7 +241,10 @@ async def order_card(request: web.Request) -> dict:
         "can_confirm": order["status"] in ("new", "awaiting_payment", "paid_claimed"),
         "can_ship": order["status"] in queries.SHIPPABLE_STATUSES,
         "can_finish": order["status"] == "shipped",
-        "can_cancel": order["status"] != "cancelled",
+        # Выполненный заказ отменять нечего: посылку забрали, и «возврат товара на
+        # склад» только испортил бы остатки. Отменить можно всё до этого — включая
+        # отправленный, посылку ведь могут и не забрать.
+        "can_cancel": order["status"] not in _CANCEL_CLOSED,
         "timeline": [
             ("Оформлен", order["created_at"]),
             ("Клиент сказал, что оплатил", order["paid_at"]),
@@ -313,6 +322,11 @@ async def order_finish(request: web.Request) -> web.Response:
 async def order_cancel(request: web.Request) -> web.Response:
     """Отмена с возвратом остатков. Причина остаётся внутри, клиенту не уходит."""
     order = await _order_or_404(request)
+    # Проверка серверная, а не только в шаблоне: страница могла открыться до того,
+    # как заказ отметили выполненным.
+    if order["status"] in _CANCEL_CLOSED:
+        _redirect(f"/orders/{order['id']}", err="cancel_closed")
+
     data = await request.post()
     reason = forms.text(data, "reason", max_len=200)
     who = _manager(request)

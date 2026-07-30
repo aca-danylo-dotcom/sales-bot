@@ -11,6 +11,7 @@ import base64
 import binascii
 import gzip
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
@@ -234,12 +235,37 @@ def _lower_uni(value: str | None) -> str | None:
     return value.lower() if isinstance(value, str) else value
 
 
+# Размер пишут как придётся: «12 oz» и «12oz», «42» и «р.42», «размер M», а букву
+# «М» набирают русской раскладкой — от латинской она отличается только кодом.
+# Из-за такой мелочи бот отвечал «этого размера нет», хотя размер лежит на складе.
+# Поэтому любой размер приводим к одному ключу — и в Python, и внутри SQL.
+_SIZE_PREFIX_RE = re.compile(r"^(размеры?|розміри?|разм|size|рр|р)[\s.:;№-]*")
+_SIZE_DROP_RE = re.compile(r"[\s.,;:_/№()-]+")
+# Русские буквы, которые визуально совпадают с латинскими: «М» → «M».
+_SIZE_HOMOGLYPHS = str.maketrans({
+    "а": "a", "в": "b", "е": "e", "к": "k", "м": "m", "н": "h", "о": "o",
+    "р": "p", "с": "c", "т": "t", "у": "y", "х": "x", "л": "l", "і": "i",
+})
+# «С» и «ХС» русскими буквами — это S и XS: после гомоглифов они стали c/xc.
+_SIZE_ALIASES = {"c": "s", "xc": "xs", "xxc": "xxs"}
+
+
+def size_key(value: str | None) -> str:
+    """Размер в сравнимом виде: «12 oz», «12OZ» и «размер 12 oz» — один ключ."""
+    if not isinstance(value, str):
+        return ""
+    text = _SIZE_PREFIX_RE.sub("", value.strip().lower())
+    text = _SIZE_DROP_RE.sub("", text).translate(_SIZE_HOMOGLYPHS)
+    return _SIZE_ALIASES.get(text, text)
+
+
 @asynccontextmanager
 async def get_connection() -> AsyncIterator[aiosqlite.Connection]:
     """Открывает соединение с включёнными внешними ключами и row_factory=Row."""
     conn = await aiosqlite.connect(config.DB_PATH)
     conn.row_factory = aiosqlite.Row
     await conn.create_function("lower_uni", 1, _lower_uni, deterministic=True)
+    await conn.create_function("size_key", 1, size_key, deterministic=True)
     await conn.execute("PRAGMA foreign_keys = ON")
     # Ждать освобождения блокировки до 5 c, а не падать с "database is locked"
     # (важно при BEGIN IMMEDIATE в создании заказа — второй писатель дожидается).

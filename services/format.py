@@ -7,7 +7,27 @@
 """
 from __future__ import annotations
 
+import re
+
 import config
+
+# Имя получателя: буквы, пробел, дефис и апостроф — всё, что бывает в «Анна-Мария
+# О'Коннор». Цифры, @, ссылки и эмодзи в имени означают, что человек написал в
+# поле имени что-то другое: ник, адрес или отговорку.
+_NAME_ALLOWED_RE = re.compile(r"^[^\W\d_]+(?:[ \-'’][^\W\d_]+)*$", re.UNICODE)
+_VOWELS = set("аеёиоуыэюяіїєaeiouy")
+# Апостроф — часть слова («О'Коннор», «Мар'я»), а не разделитель: делить по нему
+# нельзя, иначе «я» и «О» превращаются в слова из одной буквы и имя не проходит.
+_NAME_SPLIT_RE = re.compile(r"[ \-]+")
+# Отговорки на месте имени и строки, набранные по клавиатуре: в накладную такое
+# писать нельзя, а гласные в них есть — одной проверкой гласных не отсеются.
+_NOT_NAMES = {
+    "нет", "нету", "незнаю", "неважно", "пофиг", "какразница", "любое", "тест",
+    "test", "аноним", "яяя", "ктото", "никто", "какобычно", "самзнаешь", "покупатель",
+    "asd", "asdf", "asdfg", "asdasd", "qwe", "qwer", "qwerty", "фыв", "фыва",
+    "фывап", "йцу", "йцук", "йцукен", "ыва", "zxc", "zxcv",
+}
+_MAX_NAME_WORDS = 4
 
 
 def money(value: float) -> str:
@@ -29,6 +49,33 @@ def plural(count: int, one: str, few: str, many: str) -> str:
     if 2 <= tail <= 4 and not 12 <= hundred <= 14:
         return few
     return many
+
+
+def looks_like_name(text: str | None) -> bool:
+    """Похоже ли это на настоящее имя получателя.
+
+    Проверка нужна и боту на шаге оформления, и ИИ перед записью имени в профиль:
+    по этому имени курьер ищет человека в отделении, а «asdf», «ник в телеграме»
+    или «не знаю» посылку никому не выдадут. Требуем немного: только буквы (с
+    дефисом и апострофом), хотя бы одну гласную в каждом слове, не больше четырёх
+    слов. Редкое имя, транслит и украинские буквы проходят — отсекается мусор.
+    """
+    value = " ".join((text or "").split())
+    if not 2 <= len(value) <= 60 or not _NAME_ALLOWED_RE.match(value):
+        return False
+
+    words = _NAME_SPLIT_RE.split(value.lower())
+    if len(words) > _MAX_NAME_WORDS:
+        return False
+    if "".join(words) in _NOT_NAMES or any(word in _NOT_NAMES for word in words):
+        return False
+    return all(
+        # Гласная в каждом слове: «Кшиштоф» проходит, «джджд» — нет.
+        len(word) >= 2 and (set(word) & _VOWELS)
+        # И хотя бы две разные буквы, без трёх одинаковых подряд: «ааааа» — не имя.
+        and len(set(word)) > 1 and not re.search(r"(.)\1\1", word)
+        for word in words
+    )
 
 
 def variant_label(variant: dict) -> str:

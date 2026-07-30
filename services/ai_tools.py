@@ -13,11 +13,13 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 
 from db import queries
+from db.database import size_key
 from services import agent_stats
-from services.format import ORDER_STATUS_RU  # noqa: F401 — используется ниже и в хендлерах
+from services.format import ORDER_STATUS_RU, looks_like_name  # noqa: F401 — и в хендлерах
 
 # Сколько карточек с фото отправляем за один ответ. Больше — это уже спам в чат
 # и лишние мегабайты у клиента, к тому же Telegram шлёт их заметно дольше.
@@ -63,23 +65,65 @@ def _product_brief(product: dict, *, with_description: bool = False) -> dict:
     return brief
 
 
-def _flat(value: str | None) -> str:
-    """Размер в сравнимом виде: без регистра и без пробелов внутри."""
-    return (value or "").lower().replace(" ", "")
-
-
 def _matches(variant: dict, size: str | None, color: str | None) -> bool:
     """Подходит ли вариант под запрошенные размер и цвет.
 
-    Размер сравниваем целиком (42 — это не 42.5), но без пробелов: «12oz» и
-    «12 oz» — один и тот же размер. Цвет — вхождением: клиент пишет «чёрные», а
-    в базе лежит «чёрный».
+    Размер сравниваем целиком (42 — это не 42.5), но через size_key: «12oz» и
+    «12 oz», «р.42» и «42», русская «М» и латинская «M» — один и тот же размер,
+    и та же функция сравнивает размеры в SQL-поиске. Цвет — вхождением: клиент
+    пишет «чёрные», а в базе лежит «чёрный».
     """
-    if size and _flat(variant.get("size")) != _flat(size):
+    if size and size_key(variant.get("size")) != size_key(size):
         return False
     if color and color.strip().lower() not in (variant.get("color") or "").strip().lower():
         return False
     return True
+
+
+# Размер, названный словами в запросе: «44», «42.5», «12 oz», «xl», «размер м».
+# Диапазон у чисел узкий намеренно: «2 пары» и «до 1000 грн» — не размеры.
+_SIZE_WORD_RE = re.compile(r"^(x{0,3}[sml]|\d{1,3}(?:[.,]5)?(?:oz|kg|см|cm)?)$")
+_SIZE_NUMBER_RANGE = (14, 60)
+
+
+def _looks_like_size(word: str) -> bool:
+    """Похоже ли слово на размер само по себе (когда в каталоге его нет)."""
+    key = size_key(word)
+    if not _SIZE_WORD_RE.match(key):
+        return False
+
+    number = key.replace(",", ".")
+    if not number.replace(".", "", 1).isdigit():
+        return True     # буквенный размер (s/m/l/xl) или число с единицей («12 oz»)
+    low, high = _SIZE_NUMBER_RANGE
+    return low <= float(number) <= high
+
+
+def _asked_size(args: dict, products: list[dict]) -> str:
+    """Размер, о котором спросил клиент: из параметра, а иначе — из его слов.
+
+    Модель не всегда передаёт size, а вопрос «а 44-й есть?» без него выглядит как
+    обычный поиск: товар найдётся, нужного размера в наличии не будет, и модель
+    решит, что всё в порядке. Поэтому размер ищем и в тексте запроса — сначала
+    среди размеров найденных товаров, потом по форме слова.
+    """
+    size = (args.get("size") or "").strip()
+    if size:
+        return size
+
+    words = re.findall(r"[^\s,;!?]+", (args.get("query") or "").lower())
+    # Размер бывает и в два слова — «12 oz», «размер 44». Пары проверяем первыми,
+    # иначе из «12 oz» останется «12» и совпадения с «12 oz» на складе не будет.
+    candidates = [f"{first} {second}" for first, second in zip(words, words[1:])] + words
+    known = {size_key(v.get("size")) for p in products for v in p.get("variants", [])}
+    known.discard("")
+    for candidate in candidates:
+        if size_key(candidate) in known:
+            return candidate
+    for candidate in candidates:
+        if _looks_like_size(candidate):
+            return candidate
+    return ""
 
 
 # --- Схемы инструментов (Responses API) ---
@@ -260,16 +304,20 @@ def build_executor(ctx: ClientContext):
             ctx.show(product["id"])
 
         result = {"products": [_product_brief(p) for p in products]}
-        size, color = (args.get("size") or "").strip(), (args.get("color") or "").strip()
+        color = (args.get("color") or "").strip()
+        size = _asked_size(args, products)
         if products and (size or color) and not any(
             _matches(v, size or None, color or None) and v.get("stock", 0) > 0
             for p in products for v in p.get("variants", [])
         ):
             # Поиск ослабил фильтр, чтобы показать товар вместо пустоты. Без этой
             # оговорки модель решит, что раз товар нашёлся — нужный размер есть.
-            result["note"] = ("Товары похожие, но запрошенного размера или цвета в "
-                              "наличии нет. Скажи об этом прямо и предложи то, "
-                              "что реально есть в in_stock.")
+            asked = " ".join(part for part in (size, color) if part)
+            result["asked"] = {"size": size, "color": color, "available": False}
+            result["note"] = (f"«{asked}» в наличии нет. Первым делом скажи об этом "
+                              "прямо: такого размера или цвета сейчас нет. Только "
+                              "потом предложи то, что реально есть в in_stock, — и "
+                              "не выдавай это за то, о чём спросил клиент.")
         if not products:
             # Пустой результат — самый рискованный момент: без подсказки модель
             # склонна «вспомнить» товар. Отдаём ей то, что есть на витрине,
@@ -409,6 +457,12 @@ def build_executor(ctx: ClientContext):
         name = (args.get("name") or "").strip()[:100]
         if not name:
             return _dump({"status": "nothing_to_save"})
+        if not looks_like_name(name):
+            # Ник из чата или «не знаю» в профиль не пускаем: форма оформления
+            # предложит это имя кнопкой «Оставить», и оно уедет в накладную.
+            return _dump({"status": "rejected", "reason": "not_a_name",
+                          "hint": "Это не похоже на имя получателя. Спроси имя и "
+                                  "фамилию человека, на которого оформляем заказ."})
 
         await queries.update_client(client_id, name=name)
         return _dump({"status": "saved", "saved": ["name"]})

@@ -12,7 +12,7 @@ import re
 from typing import Any, Iterable
 
 import config
-from db.database import get_connection
+from db.database import get_connection, size_key
 
 
 def _rows(rows: Iterable[Any]) -> list[dict]:
@@ -359,10 +359,11 @@ async def _search_attempt(
     variant_conditions = ["v.product_id = p.id"]
     variant_params: list[Any] = []
     if size:
-        # Пробелы убираем с обеих сторон: «12oz» и «12 oz» — один размер, а вот
-        # вхождением сравнивать нельзя (42 не должен совпасть с 42.5 и 142).
-        variant_conditions.append("replace(lower_uni(v.size), ' ', '') = ?")
-        variant_params.append(size.lower().replace(" ", ""))
+        # size_key() сводит запись размера к одному виду: «12oz» = «12 oz», «р.42»
+        # = «42», русская «М» = латинская «M». Сравниваем целиком, а не вхождением
+        # (42 не должен совпасть с 42.5 и 142).
+        variant_conditions.append("size_key(v.size) = ?")
+        variant_params.append(size_key(size))
     if color:
         variant_conditions.append("lower_uni(v.color) LIKE ?")
         variant_params.append(f"%{color.lower().strip()}%")

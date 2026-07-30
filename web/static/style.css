@@ -312,17 +312,73 @@ select {
 }
 select:hover { border-color: #d6d6dc; }
 
-/* Сам выпадающий список рисует браузер, и оформлять его мы не пытаемся.
-   Раньше здесь стоял блок @supports (appearance: base-select) — новый способ
-   стилизовать список как обычный блок. Как только браузер включил эту фичу у
-   себя, блок начал применяться: список открывался прозрачным (его видимость
-   держалась на ::picker(select):open), а заданный там option { display: flex }
-   заодно ломал подсказки в полях с datalist. Списки просто переставали
-   показываться — по всей панели сразу, без единой правки с нашей стороны.
+/* Сам список — в стиле панели: белая карточка со скруглением и тенью, как
+   остальные карточки, выбранный пункт подсвечен и помечен галочкой.
 
-   Свой вид списка того не стоил: поле select и так выглядит как остальные —
-   те же скругления, та же своя стрелка выше, — а открывается системным, то
-   есть работает в любом браузере и на телефоне. */
+   ДВА ПРАВИЛА, КОТОРЫЕ ЗДЕСЬ НЕЛЬЗЯ НАРУШАТЬ — на них уже наступили раз, и
+   списки перестали открываться по всей панели:
+
+   1. Ничего, что управляет видимостью списка: ни opacity, ни visibility, ни
+      display, ни transform, ни transition/@starting-style. Показывает и
+      скрывает список браузер. В прошлый раз здесь стояло opacity: 0 в базовом
+      состоянии и opacity: 1 на ::picker(select):open — как только браузер
+      включил у себя поддержку, список стал открываться прозрачным, то есть
+      «кнопка ничего не делает».
+   2. Пункты — только через «select option». Голый «option» задевает и
+      подсказки в полях с datalist (категория товара), а их устройство совсем
+      другое — они от таких правил ломаются.
+
+   Всё, что ниже, — только цвета, отступы и скругления. Если браузер чего-то
+   из этого не поймёт, список останется системным, но откроется. */
+@supports (appearance: base-select) {
+  select, ::picker(select) { appearance: base-select; }
+
+  select {
+    /* Стрелку теперь рисует ::picker-icon — фоновая картинка дала бы вторую. */
+    background-image: none;
+    padding-right: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  select::picker-icon {
+    color: var(--muted);
+    /* Поворот стрелки — оформление самой кнопки, а не списка: даже если
+       переход не сработает, на открытие списка это не влияет. */
+    transition: transform 0.16s ease;
+  }
+  select:open::picker-icon { transform: rotate(180deg); }
+  select:open { border-color: var(--accent); }
+
+  ::picker(select) {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--card);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
+    padding: 6px;
+    margin-top: 6px;
+    /* Категорий может быть много — длинный список листается внутри себя. */
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  select option {
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 15px;
+    /* Галочка выбранного пункта стоит в отдельной колонке, поэтому подписи
+       выравниваются по левому краю независимо от неё. */
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+  }
+  select option:hover, select option:focus {
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+  select option:checked { font-weight: 500; }
+  select option::checkmark { color: var(--accent); }
+}
 
 /* ─── Выбор файлов ─── */
 

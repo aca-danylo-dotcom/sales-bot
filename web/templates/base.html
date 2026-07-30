@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}CRM{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
+  {# ?v=… — метка содержимого файла: после обновления панели браузер берёт новые
+     стили сам, без «обновите страницу с Ctrl+F5». Считается в web/app.py. #}
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v|default('0') }}">
 </head>
 <body>
 <header class="topbar">
@@ -29,5 +31,8 @@
   {% if error %}<p class="flash err">{{ error }}</p>{% endif %}
   {% block content %}{% endblock %}
 </main>
+{# Скрипт только улучшает формы (двойное сохранение, накопление фото). Всё
+   работает и без него — поэтому defer в конце, а не блокирующая загрузка. #}
+<script src="/static/app.js?v={{ asset_v|default('0') }}" defer></script>
 </body>
 </html>

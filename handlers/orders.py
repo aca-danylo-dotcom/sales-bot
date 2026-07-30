@@ -41,14 +41,19 @@ from keyboards.orders import (
     CB_DEL,
     CB_INC,
     CB_KEEP,
+    CB_ORD_CANCEL,
+    CB_ORD_CANCEL_OK,
+    CB_ORDERS,
     CB_PAID,
     CB_PICK,
     CB_RESTART,
     CB_SKIP,
     admin_order_kb,
     added_kb,
+    can_client_cancel,
     cart_kb,
     clear_confirm_kb,
+    order_cancel_confirm_kb,
     orders_kb,
     payment_kb,
     phone_kb,
@@ -82,6 +87,11 @@ _MAX_ORDERS_SHOWN = 5
 # Телефон: оставляем только цифры и ведущий плюс. Украинский номер — 10 цифр
 # без кода страны, международный — до 15 (стандарт E.164).
 _PHONE_CLEAN_RE = re.compile(r"[^\d+]")
+
+# Отделение Новой Почты всегда с номером: «12», «№12», «Поштомат 4521».
+# Без цифры это не адрес доставки, а фраза вроде «как обычно» или «на твоё
+# усмотрение» — по такой строке посылку не отправить, поэтому переспрашиваем.
+_BRANCH_DIGIT_RE = re.compile(r"\d")
 
 
 def _esc(value: object) -> str:
@@ -139,7 +149,8 @@ _PROMPTS = {
     "phone": ("Нужен номер телефона — по нему свяжется курьер.\n"
               "Нажмите кнопку ниже или напишите номер вручную."),
     "city": "В какой город доставляем?",
-    "np_branch": "Номер отделения Новой Почты (можно с адресом).",
+    "np_branch": ("Номер отделения Новой Почты — например «12» или «Поштомат 4521».\n"
+                  "Можно дописать улицу, но номер нужен обязательно."),
     "comment": "Комментарий к заказу — если есть. Или нажмите «Пропустить».",
 }
 
@@ -281,10 +292,17 @@ def _summary_text(cart: dict, data: dict) -> str:
         "",
         f"Получатель: {_esc(data.get('name', ''))}",
         f"Телефон: {_esc(data.get('phone', ''))}",
-        f"Доставка: {_esc(data.get('city', ''))}, {_esc(data.get('np_branch', ''))}",
+        "",
+        # Адрес отдельным блоком и жирным: именно его чаще всего и не замечают
+        # в общем списке, а потом посылка уезжает не в то отделение.
+        "<b>📦 Куда везём:</b>",
+        f"<b>{_esc(data.get('city', ''))}, отделение "
+        f"{_esc(data.get('np_branch', ''))}</b>",
     ]
     if data.get("comment"):
+        lines.append("")
         lines.append(f"Комментарий: {_esc(data['comment'])}")
+    lines += ["", "Всё верно? Если адрес не тот — «Ввести данные заново»."]
     return "\n".join(lines)
 
 
@@ -534,9 +552,14 @@ async def _start_checkout(message: Message, state: FSMContext, client_id: int) -
         return
 
     client = await queries.get_client(client_id) or {}
-    await state.set_data({
-        "profile": {field: client.get(field) or "" for field in _PROFILE_FIELDS},
-    })
+    profile = {field: client.get(field) or "" for field in _PROFILE_FIELDS}
+    # У старых клиентов в профиле мог осесть адрес, который дописал ИИ (до того,
+    # как ему это запретили). Отделение без номера — заведомо не адрес: не
+    # предлагаем его кнопкой «Оставить», пусть человек напишет сам.
+    if profile["np_branch"] and not _BRANCH_DIGIT_RE.search(profile["np_branch"]):
+        profile["np_branch"] = ""
+
+    await state.set_data({"profile": profile})
     await _ask(message, state, "name")
 
 
@@ -648,6 +671,14 @@ async def step_text(message: Message, state: FSMContext) -> None:
     if len(text) < low:
         await message.answer("Слишком коротко — напишите, пожалуйста, подробнее.")
         return
+
+    if field == "np_branch" and not _BRANCH_DIGIT_RE.search(text):
+        await message.answer(
+            "В отделении Новой Почты должен быть номер. Напишите его цифрой — "
+            "например «12», «№7» или «Поштомат 4521»."
+        )
+        return
+
     await _accept(message, state, field, text[:high])
 
 
@@ -754,17 +785,11 @@ async def claim_paid(callback: CallbackQuery, bot: Bot) -> None:
 # ─────────────────────────── Мои заказы ───────────────────────────
 
 
-@router.message(StateFilter(None), F.text == BTN_ORDERS)
-async def my_orders(message: Message) -> None:
-    """Последние заказы со статусами и кнопкой оплаты для тех, что её ждут."""
-    await queries.ensure_client(message.from_user.id)
-    orders = await queries.get_client_orders(message.from_user.id, _MAX_ORDERS_SHOWN)
+async def _orders_view(client_id: int) -> tuple[str, object]:
+    """Текст и кнопки списка заказов. Один источник для сообщения и для callback."""
+    orders = await queries.get_client_orders(client_id, _MAX_ORDERS_SHOWN)
     if not orders:
-        await message.answer(
-            "Заказов пока нет. Напишите, что ищете — подберу 🙂",
-            reply_markup=main_menu(),
-        )
-        return
+        return "Заказов пока нет. Напишите, что ищете — подберу 🙂", None
 
     lines = ["<b>📦 Ваши заказы</b>", ""]
     for order in orders:
@@ -774,7 +799,112 @@ async def my_orders(message: Message) -> None:
         )
         if order["ttn"]:
             lines.append(f"    Накладная: {_esc(order['ttn'])}")
+    return "\n".join(lines), orders_kb(orders)
 
+
+@router.message(StateFilter(None), F.text == BTN_ORDERS)
+async def my_orders(message: Message) -> None:
+    """Последние заказы со статусами, кнопками оплаты и отмены."""
+    await queries.ensure_client(message.from_user.id)
+    text, markup = await _orders_view(message.from_user.id)
     await message.answer(
-        "\n".join(lines), reply_markup=orders_kb(orders), parse_mode=_HTML
+        text, reply_markup=markup or main_menu(), parse_mode=_HTML
     )
+
+
+@router.callback_query(F.data == CB_ORDERS)
+async def my_orders_callback(callback: CallbackQuery) -> None:
+    """Возврат к списку заказов — например, из отказа от отмены."""
+    text, markup = await _orders_view(callback.from_user.id)
+    await _edit_or_send(callback, text, markup)
+    await callback.answer()
+
+
+# ─────────────────────── Отмена заказа клиентом ───────────────────────
+
+
+async def _client_order(callback: CallbackQuery) -> dict | None:
+    """Заказ из callback'а, если он принадлежит нажавшему. Иначе None."""
+    order_id = int(callback.data.split(":")[-1])
+    order = await queries.get_order(order_id)
+    if not order or order["client_id"] != callback.from_user.id:
+        await callback.answer("Заказ не найден", show_alert=True)
+        return None
+    return order
+
+
+@router.callback_query(F.data.startswith(f"{CB_ORD_CANCEL}:"))
+async def order_cancel_ask(callback: CallbackQuery) -> None:
+    """Переспрос перед отменой: показываем, что именно отменяем."""
+    order = await _client_order(callback)
+    if not order:
+        return
+
+    if not can_client_cancel(order):
+        await callback.answer(
+            f"Заказ №{order['id']} уже отменить нельзя — "
+            f"{ORDER_STATUS_RU.get(order['status'], order['status'])}. "
+            f"Напишите нам, разберёмся.",
+            show_alert=True,
+        )
+        return
+
+    await _edit_or_send(
+        callback,
+        f"Отменить заказ №{order['id']} на {money(order['total'])}?\n\n"
+        f"{order_items_text(order)}\n\n"
+        f"Товар вернётся на витрину, а заказ — восстановить не получится: "
+        f"если передумаете, оформим заново.",
+        order_cancel_confirm_kb(order["id"]),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(f"{CB_ORD_CANCEL_OK}:"))
+async def order_cancel_do(callback: CallbackQuery, bot: Bot) -> None:
+    """Отмена заказа клиентом: возвращает остатки и уведомляет владельца.
+
+    Статус перечитываем прямо перед отменой: пока висел переспрос, владелец мог
+    успеть отправить посылку и вбить накладную.
+    """
+    order = await _client_order(callback)
+    if not order:
+        return
+
+    if not can_client_cancel(order):
+        await callback.answer(
+            f"Заказ №{order['id']} уже отменить нельзя — "
+            f"{ORDER_STATUS_RU.get(order['status'], order['status'])}.",
+            show_alert=True,
+        )
+        return
+
+    if not await queries.cancel_order(order["id"], note="Отменён покупателем"):
+        await callback.answer("Заказ уже отменён", show_alert=True)
+        return
+
+    await _edit_or_send(
+        callback,
+        f"Заказ №{order['id']} отменён, товар вернулся на витрину.\n\n"
+        f"Будет нужно — соберём новый заказ 🙂",
+    )
+    await callback.answer("Заказ отменён")
+    await _notify_admin_cancelled(bot, order, callback.from_user.username)
+
+
+async def _notify_admin_cancelled(bot: Bot, order: dict, username: str | None) -> None:
+    """Владельцу — что заказ отменил сам покупатель. Ошибку глушим: заказ уже отменён."""
+    contact = f"@{username}" if username else f"id {order['client_id']}"
+    text = (
+        f"🚫 <b>Покупатель отменил заказ №{order['id']}</b>\n"
+        f"Товар вернулся на витрину.\n\n"
+        f"{order_items_text(order)}\n\n"
+        f"<b>Сумма: {money(order['total'])}</b>\n\n"
+        f"Получатель: {_esc(order['name'])}\n"
+        f"Телефон: {_esc(order['phone'])}\n"
+        f"Клиент: {_esc(contact)}"
+    )
+    try:
+        await bot.send_message(config.ADMIN_ID, text, parse_mode=_HTML)
+    except (TelegramForbiddenError, TelegramBadRequest):
+        logger.exception("Не удалось сообщить владельцу об отмене заказа %s", order["id"])

@@ -39,6 +39,17 @@ CB_RESTART = "o:again"     # заполнить данные заново
 CB_CANCEL = "o:cancel"     # выйти из оформления
 CB_PAID = "o:paid"         # o:paid:<order_id> — «Я оплатил»
 CB_ORDERS = "o:list"       # мои заказы
+CB_ORD_CANCEL = "o:ocan"      # o:ocan:<order_id> — клиент просит отменить заказ
+CB_ORD_CANCEL_OK = "o:ocanok"  # o:ocanok:<order_id> — подтверждённая отмена
+
+# Пока накладной нет, посылка ещё не уехала — заказ можно отменить и вернуть
+# товар на витрину. После отправки отменяет уже только владелец.
+CANCELLABLE_STATUSES = ("new", "awaiting_payment", "paid_claimed", "confirmed")
+
+
+def can_client_cancel(order: dict) -> bool:
+    """Может ли покупатель отменить этот заказ сам."""
+    return order["status"] in CANCELLABLE_STATUSES and not (order.get("ttn") or "")
 
 # --- Решение владельца по заказу ---
 CB_ADMIN_OK = "oa:ok"      # oa:ok:<order_id> — подтвердить оплату
@@ -159,17 +170,31 @@ def summary_kb() -> InlineKeyboardMarkup:
 def payment_kb(order_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="💳 Я оплатил", callback_data=f"{CB_PAID}:{order_id}")
+    kb.button(text="❌ Отменить заказ", callback_data=f"{CB_ORD_CANCEL}:{order_id}")
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def order_cancel_confirm_kb(order_id: int) -> InlineKeyboardMarkup:
+    """Переспрос перед отменой: тап по «Отменить» бывает случайным."""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="❌ Да, отменить заказ",
+              callback_data=f"{CB_ORD_CANCEL_OK}:{order_id}")
+    kb.button(text="Нет, оставить", callback_data=CB_ORDERS)
+    kb.adjust(1)
     return kb.as_markup()
 
 
 def orders_kb(orders: list[dict]) -> InlineKeyboardMarkup | None:
-    """Кнопки «Я оплатил» для заказов, которые всё ещё ждут оплаты.
+    """Кнопки под списком заказов: оплатить и отменить.
 
-    Нужны, потому что сообщение с реквизитами теряется в переписке, а без
-    кнопки клиент не может сообщить об оплате.
+    «Я оплатил» нужна, потому что сообщение с реквизитами теряется в переписке.
+    «Отменить» — потому что до отправки посылки передумать имеет право клиент,
+    а не только владелец: иначе товар висит списанным до таймаута.
     """
     waiting = [o for o in orders if o["status"] == "awaiting_payment"]
-    if not waiting:
+    cancellable = [o for o in orders if can_client_cancel(o)]
+    if not waiting and not cancellable:
         return None
 
     kb = InlineKeyboardBuilder()
@@ -177,6 +202,11 @@ def orders_kb(orders: list[dict]) -> InlineKeyboardMarkup | None:
         kb.button(
             text=f"💳 Оплатил заказ №{order['id']} — {money(order['total'])}",
             callback_data=f"{CB_PAID}:{order['id']}",
+        )
+    for order in cancellable:
+        kb.button(
+            text=f"❌ Отменить заказ №{order['id']}",
+            callback_data=f"{CB_ORD_CANCEL}:{order['id']}",
         )
     kb.adjust(1)
     return kb.as_markup()

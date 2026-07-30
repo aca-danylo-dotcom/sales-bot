@@ -312,62 +312,17 @@ select {
 }
 select:hover { border-color: #d6d6dc; }
 
-/* Сам выпадающий список браузер до недавнего времени рисовал сам, и CSS его
-   не брал. Теперь в Chrome и Edge список можно оформить как обычный блок —
-   включаем это там, где поддерживается; в остальных браузерах остаётся
-   системный вид, поле при этом выглядит одинаково везде. */
-@supports (appearance: base-select) {
-  select, ::picker(select) { appearance: base-select; }
+/* Сам выпадающий список рисует браузер, и оформлять его мы не пытаемся.
+   Раньше здесь стоял блок @supports (appearance: base-select) — новый способ
+   стилизовать список как обычный блок. Как только браузер включил эту фичу у
+   себя, блок начал применяться: список открывался прозрачным (его видимость
+   держалась на ::picker(select):open), а заданный там option { display: flex }
+   заодно ломал подсказки в полях с datalist. Списки просто переставали
+   показываться — по всей панели сразу, без единой правки с нашей стороны.
 
-  select {
-    background-image: none;
-    padding-right: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    text-align: left;
-  }
-  select::picker-icon {
-    color: var(--muted);
-    flex: none;
-    transition: transform 0.18s ease;
-  }
-  select:open::picker-icon { transform: rotate(180deg); }
-
-  ::picker(select) {
-    margin-top: 6px;
-    padding: 6px;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: var(--card);
-    box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.25);
-    opacity: 0;
-    transform: translateY(-4px);
-    transition: opacity 0.16s ease, transform 0.16s ease, overlay 0.16s allow-discrete,
-                display 0.16s allow-discrete;
-  }
-  ::picker(select):open { opacity: 1; transform: translateY(0); }
-  @starting-style {
-    ::picker(select):open { opacity: 0; transform: translateY(-4px); }
-  }
-
-  option {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 9px 12px;
-    border-radius: 10px;
-    font-size: 15px;
-  }
-  option:hover, option:focus { background: var(--accent-soft); outline: none; }
-  option:checked { color: var(--accent); }
-  option::checkmark { color: var(--accent); order: 1; margin-left: auto; }
-
-  @media (prefers-reduced-motion: reduce) {
-    select::picker-icon, ::picker(select) { transition: none; }
-  }
-}
+   Свой вид списка того не стоил: поле select и так выглядит как остальные —
+   те же скругления, та же своя стрелка выше, — а открывается системным, то
+   есть работает в любом браузере и на телефоне. */
 
 /* ─── Выбор файлов ─── */
 
@@ -636,6 +591,42 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 
 .upload { flex-direction: row; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
 .upload label { max-width: 360px; }
+
+/* Список файлов, выбранных до сохранения: его рисует app.js, чтобы повторный
+   выбор в диалоге добавлял фото, а не заменял весь набор. Без скрипта блока
+   просто нет — вёрстка от этого не меняется. */
+.picked {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.picked li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--muted);
+  background: #f5f5f7;
+  border-radius: 10px;
+  padding: 6px 8px 6px 12px;
+}
+.picked li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Действия над товаром целиком ─── */
+
+/* Стоят внизу карточки, отдельным блоком: рядом с полями их легко нажать
+   вместо «Сохранить всё». */
+.card-actions .row { display: flex; gap: 12px; flex-wrap: wrap; }
+.card-actions p { margin-top: 12px; }
 
 /* ─── Пагинация ─── */
 

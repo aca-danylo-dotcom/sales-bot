@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -40,6 +41,21 @@ STATIC_DIR = BASE_DIR / "static"
 # с телефона целиком, поэтому поднимаем его до размера, в который влезает
 # несколько снимков; отдельный файл всё равно ограничен в web/products.py.
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+
+def _assets_version() -> str:
+    """Короткая метка содержимого стилей и скрипта — для адреса вида style.css?v=…
+
+    Без неё браузер держит старый файл в памяти сколь угодно долго: правку стилей
+    видно только после жёсткой перезагрузки, а продавец о ней не знает и решает,
+    что панель сломана. Метка считается от содержимого, а не от даты файла: при
+    обновлении сервера адрес меняется только если файл действительно другой.
+    """
+    digest = hashlib.sha1()
+    for name in sorted(p.name for p in STATIC_DIR.glob("*") if p.is_file()):
+        digest.update(name.encode())
+        digest.update((STATIC_DIR / name).read_bytes())
+    return digest.hexdigest()[:8]
 
 
 async def health(request: web.Request) -> web.Response:
@@ -83,7 +99,7 @@ def create_app(bot=None) -> web.Application:
         client_max_size=MAX_UPLOAD_BYTES, middlewares=[same_origin_only]
     )
     app["bot"] = bot
-    aiohttp_jinja2.setup(
+    env = aiohttp_jinja2.setup(
         app,
         loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
         # Автоэкранирование включено везде: в шаблоны попадают имена клиентов и
@@ -98,6 +114,7 @@ def create_app(bot=None) -> web.Application:
             "plain": forms.plain_number,
         },
     )
+    env.globals["asset_v"] = _assets_version()
     app.router.add_get("/health", health)
     summary.setup_routes(app)
     products.setup_routes(app)

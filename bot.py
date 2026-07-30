@@ -22,6 +22,7 @@ from db.database import init_db
 from services import agent_stats, sheets
 from services.jobs import setup_scheduler
 from handlers.admin import router as admin_router
+from handlers.catalog import router as catalog_router
 from handlers.client import router as client_router
 from handlers.orders import router as orders_router
 from web.app import start_web
@@ -37,6 +38,9 @@ dp.include_router(admin_router)
 # Корзина и оформление — между админкой и ИИ: кнопки «Корзина» и «Мои заказы»
 # приходят обычным текстом, и клиентский роутер отдал бы их модели.
 dp.include_router(orders_router)
+# Каталог по кнопке — тоже раньше ИИ: иначе «🛍 Каталог» уходит модели обычной
+# репликой, и она вместо витрины начинает уточнять, что именно нужно.
+dp.include_router(catalog_router)
 dp.include_router(client_router)
 
 

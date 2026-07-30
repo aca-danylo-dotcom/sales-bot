@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from urllib.parse import parse_qsl, urlencode
 from uuid import uuid4
@@ -47,6 +48,7 @@ MESSAGES = {
     "variant_added": "Вариант добавлен.",
     "variant_deleted": "Вариант удалён.",
     "photo_added": "Фото загружено.",
+    "photo_dupe": "Это фото у товара уже есть — второй раз добавлять не стал.",
     "photo_main": "Главное фото изменено.",
     "photo_deleted": "Фото удалено.",
 }
@@ -278,8 +280,12 @@ async def product_save(request: web.Request) -> web.Response:
             )
 
     photos = [f for f in data.getall("photo", []) if getattr(f, "filename", "")]
-    if photos and not await _store_photos(product_id, photos):
-        err = err or "part_photo"
+    if photos:
+        # Дубли — не ошибка: так выглядит второе нажатие «Сохранить всё» с тем
+        # же выбранным фото. Ругаемся, только если не приняли вообще ничего.
+        saved, dupes = await _store_photos(product_id, photos)
+        if not saved and not dupes:
+            err = err or "part_photo"
 
     # С «Готово» уходим в список — но только если всё прошло гладко: замечание,
     # показанное на странице, которую человек уже покинул, он не прочитает.
@@ -415,7 +421,7 @@ async def product_create(request: web.Request) -> web.Response:
 
     # Товар уже создан, поэтому непринятое фото — не повод отменять всё
     # остальное: говорим об этом в карточке, там же его и выбирают заново.
-    if photos and not await _store_photos(product_id, photos):
+    if photos and not any(await _store_photos(product_id, photos)):
         _redirect(f"/products/{product_id}", err="part_photo_new")
     _redirect(f"/products/{product_id}", ok="created_ready" if variants else "created")
 
@@ -536,14 +542,32 @@ async def stock_moved(request: web.Request) -> web.Response:
 # ─────────────────────────── Фото ───────────────────────────
 
 
-async def _store_photos(product_id: int, fields) -> int:
-    """Кладёт выбранные файлы на диск и в базу. Возвращает, сколько приняли."""
+async def _store_photos(product_id: int, fields) -> tuple[int, int]:
+    """Кладёт файлы на диск и в базу. Возвращает (сколько приняли, сколько дублей).
+
+    Дубли считаются отдельно от брака: «ноль принятых» после повторной отправки
+    формы — это нормально, а не «файл не того формата», и говорить про него надо
+    другими словами.
+
+    Одна и та же картинка второй раз не сохраняется. Владелец жаловался, что
+    фото двоятся: браузер отправляет форму повторно от двойного нажатия
+    «Сохранить», от кнопки «Назад» и при обрыве сети — а имя файла каждый раз
+    новое, поэтому по имени дубль не поймать. Сверяем sha256 содержимого.
+    """
     saved = 0
+    dupes = 0
+    seen: set[str] = set()  # дубли внутри одной отправки — файл выбран дважды
     for field in fields:
         content = field.file.read(MAX_PHOTO_BYTES + 1)
         suffix = _image_suffix(content)
         if not suffix or len(content) > MAX_PHOTO_BYTES:
             continue
+
+        content_hash = hashlib.sha256(content).hexdigest()
+        if content_hash in seen or await queries.photo_hash_exists(product_id, content_hash):
+            dupes += 1
+            continue
+        seen.add(content_hash)
 
         file_name = f"{product_id}_{uuid4().hex[:8]}{suffix}"
         try:
@@ -556,10 +580,11 @@ async def _store_photos(product_id: int, fields) -> int:
         # и запомнит выданный file_id при первом показе (см. services/media.py).
         existing = await queries.get_photos(product_id)
         await queries.add_photo(
-            product_id, file_path=file_name, is_main=not existing, sort_order=len(existing)
+            product_id, file_path=file_name, is_main=not existing,
+            sort_order=len(existing), content_hash=content_hash,
         )
         saved += 1
-    return saved
+    return saved, dupes
 
 
 async def photo_upload(request: web.Request) -> web.Response:
@@ -573,9 +598,11 @@ async def photo_upload(request: web.Request) -> web.Response:
     if not fields:
         _redirect(f"/products/{product_id}", err="photo_empty")
 
-    saved = await _store_photos(product_id, fields)
-    _redirect(f"/products/{product_id}", **({"ok": "photo_added"} if saved
-                                            else {"err": "photo_type"}))
+    saved, dupes = await _store_photos(product_id, fields)
+    if saved:
+        _redirect(f"/products/{product_id}", ok="photo_added")
+    _redirect(f"/products/{product_id}",
+              **({"ok": "photo_dupe"} if dupes else {"err": "photo_type"}))
 
 
 async def photo_main(request: web.Request) -> web.Response:

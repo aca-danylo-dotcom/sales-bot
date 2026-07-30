@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import html
 import logging
 import re
 import time
@@ -18,20 +17,18 @@ from collections import deque
 from datetime import datetime, timezone
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart
-from aiogram.types import InputMediaPhoto, Message
+from aiogram.types import Message
 
 import config
 from db import queries
-from services import agent_stats, media
+from services import agent_stats
 from services.ai import Message as ConvMessage
 from services.ai import ProviderUnavailable, run_agent
 from services.ai_tools import MAX_CARDS, TOOLS, ClientContext, build_executor
-from services.format import money, variant_label
+from services.cards import send_product_card
 from services.prompts import build_instructions
 from keyboards.menus import main_menu
-from keyboards.orders import product_card_kb
 
 logger = logging.getLogger(__name__)
 router = Router(name="client")
@@ -61,9 +58,6 @@ _user_warned: dict[int, float] = {}
 # Максимум символов во входящем сообщении: каждый символ — токены в платный ИИ.
 # Лимит щедрый — живой покупатель его не заметит, а намеренный раздув отсекается.
 _MAX_INPUT_CHARS = 1000
-
-# Telegram обрезает подпись к фото на 1024 символах — берём с запасом.
-_MAX_CAPTION = 1000
 
 
 def _get_lock(user_id: int) -> asyncio.Lock:
@@ -108,24 +102,6 @@ def _clean_markup(text: str) -> str:
         line = line.replace("*", "").replace("`", "").replace("•", "")
         lines.append(line)
     return "\n".join(lines)
-
-
-def _card_caption(product: dict) -> str:
-    """Подпись к фото товара: название, цена и что реально есть в наличии."""
-    lines = [f"<b>{html.escape(product['title'])}</b>", money(product["price"])]
-
-    in_stock = [v for v in product["variants"] if v["stock"] > 0]
-    if in_stock:
-        lines += ["", "В наличии:"]
-        for variant in in_stock[:10]:
-            lines.append(f"{html.escape(variant_label(variant))} — {variant['stock']} шт.")
-        if len(in_stock) > 10:
-            lines.append(f"…и ещё {len(in_stock) - 10}")
-    else:
-        lines += ["", "Сейчас нет в наличии."]
-
-    caption = "\n".join(lines)
-    return caption if len(caption) <= _MAX_CAPTION else caption[:_MAX_CAPTION - 1] + "…"
 
 
 def _history_to_conversation(rows: list[dict]) -> list[ConvMessage]:
@@ -269,47 +245,11 @@ async def _send_cards(message: Message, ctx: ClientContext) -> None:
     товары в ctx.show_products, а список хранит каждый товар один раз, поэтому
     в одном ответе одна и та же карточка не задваивается.
 
-    Под карточкой — кнопка «В корзину» (обработчики в handlers/orders.py):
-    положить товар может и сам консультант, но тап по кнопке короче, чем
-    объяснять модели, какой именно размер нужен.
+    Сама карточка живёт в services/cards.py: её же показывает каталог по
+    кнопке, и выглядеть они обязаны одинаково.
     """
     for product_id in ctx.show_products[:MAX_CARDS]:
         product = await queries.get_product_full(product_id)
         if not product or not product["is_active"]:
             continue
-
-        caption = _card_caption(product)
-        markup = product_card_kb(product)  # None — если всё разобрали
-        # Снятое в админке фото уходит по file_id, загруженное в веб-CRM —
-        # файлом с диска; выданный Telegram file_id запоминаем на будущее.
-        shots = media.sendable(product["photos"])[:3]
-        try:
-            if not shots:
-                # Товар без фото — карточку всё равно показываем текстом, иначе
-                # клиент не увидит ни цены, ни точного остатка.
-                await message.answer(caption, parse_mode="HTML", reply_markup=markup)
-            elif len(shots) == 1:
-                sent = await message.answer_photo(
-                    shots[0][1], caption=caption, parse_mode="HTML", reply_markup=markup
-                )
-                await media.remember_file_ids([shots[0][0]], sent)
-            else:
-                album = [InputMediaPhoto(media=shots[0][1], caption=caption,
-                                         parse_mode="HTML")]
-                album += [InputMediaPhoto(media=shot) for _, shot in shots[1:]]
-                sent = await message.answer_media_group(album)
-                await media.remember_file_ids([photo for photo, _ in shots], sent)
-                # У альбома кнопок быть не может — досылаем их отдельной строкой,
-                # иначе товар с несколькими фото окажется единственным без кнопки.
-                if markup:
-                    await message.answer(
-                        f"<b>{html.escape(product['title'])}</b> — "
-                        f"{money(product['price'])}",
-                        parse_mode="HTML",
-                        reply_markup=markup,
-                    )
-        except TelegramBadRequest:
-            # file_id мог протухнуть (фото удалено на стороне Telegram) — отдаём
-            # хотя бы текст карточки, а не роняем весь ответ.
-            logger.exception("Не удалось отправить фото товара %s", product_id)
-            await message.answer(caption, parse_mode="HTML", reply_markup=markup)
+        await send_product_card(message, product)

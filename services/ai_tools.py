@@ -185,16 +185,14 @@ TOOLS: list[dict] = [
         "type": "function",
         "name": "save_profile",
         "description": (
-            "Сохранить данные клиента для доставки: имя, город, отделение Новой Почты. "
-            "Вызывай, как только клиент их назвал. Телефон здесь не сохраняется — его "
-            "запрашивает оформление заказа отдельной кнопкой."
+            "Сохранить имя клиента, если он им представился. Больше сюда ничего не "
+            "сохраняется: телефон, город и отделение Новой Почты спрашивает оформление "
+            "заказа своими шагами — их записывает только сам клиент."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
-                "city": {"type": "string"},
-                "np_branch": {"type": "string", "description": "Отделение Новой Почты"},
             },
             "required": [],
         },
@@ -401,16 +399,19 @@ def build_executor(ctx: ClientContext):
         return _dump({"status": "ok", "cart_count": cart["count"], "cart_total": cart["total"]})
 
     async def _save_profile(args: dict) -> str:
-        fields = {
-            key: (args.get(key) or "").strip()[:100]
-            for key in ("name", "city", "np_branch")
-        }
-        saved = {k: v for k, v in fields.items() if v}
-        if not saved:
+        """Пишет в профиль только имя.
+
+        Адрес модель не трогает намеренно: раньше она сохраняла сюда город и
+        отделение в своей формулировке, а форма оформления предлагала это кнопкой
+        «Оставить: …» — в заказ уезжал адрес, который клиент не писал. Теперь адрес
+        попадает в профиль только из подтверждённого заказа (handlers/orders.py).
+        """
+        name = (args.get("name") or "").strip()[:100]
+        if not name:
             return _dump({"status": "nothing_to_save"})
 
-        await queries.update_client(client_id, **saved)
-        return _dump({"status": "saved", "saved": list(saved)})
+        await queries.update_client(client_id, name=name)
+        return _dump({"status": "saved", "saved": ["name"]})
 
     async def _my_orders() -> str:
         orders = await queries.get_client_orders(client_id, limit=5)

@@ -613,6 +613,7 @@ async def add_photo(
     *,
     is_main: bool = False,
     sort_order: int = 0,
+    content_hash: str | None = None,
 ) -> int:
     """Добавляет фото. Главное фото у товара всегда одно — прежнее снимается."""
     async with get_connection() as conn:
@@ -621,12 +622,31 @@ async def add_photo(
                 "UPDATE product_photos SET is_main = 0 WHERE product_id = ?", (product_id,)
             )
         cursor = await conn.execute(
-            """INSERT INTO product_photos (product_id, tg_file_id, file_path, is_main, sort_order)
-               VALUES (?, ?, ?, ?, ?)""",
-            (product_id, tg_file_id, file_path, 1 if is_main else 0, sort_order),
+            """INSERT INTO product_photos
+                   (product_id, tg_file_id, file_path, is_main, sort_order, content_hash)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (product_id, tg_file_id, file_path, 1 if is_main else 0, sort_order,
+             content_hash),
         )
         await conn.commit()
         return cursor.lastrowid
+
+
+async def photo_hash_exists(product_id: int, content_hash: str) -> bool:
+    """Есть ли уже у товара фото с таким содержимым.
+
+    Одну и ту же картинку владелец присылает повторно чаще, чем кажется:
+    двойное нажатие «Сохранить», возврат браузера на страницу с формой,
+    повторная отправка при обрыве сети. Сверяем не имя файла (оно каждый раз
+    новое), а хеш байтов.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT 1 FROM product_photos WHERE product_id = ? AND content_hash = ? "
+            "LIMIT 1",
+            (product_id, content_hash),
+        )
+        return await cursor.fetchone() is not None
 
 
 async def get_photos(product_id: int) -> list[dict]:

@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS product_photos (
     tg_file_id  TEXT,                           -- мгновенная отправка в Telegram
     file_path   TEXT,                           -- файл на диске: веб-CRM и Instagram
     is_main     INTEGER NOT NULL DEFAULT 0,     -- главное фото — первое в карточке
-    sort_order  INTEGER NOT NULL DEFAULT 0
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    content_hash TEXT                           -- sha256 файла: защита от дублей
 );
 
 CREATE INDEX IF NOT EXISTS idx_photos_product ON product_photos(product_id);
@@ -179,6 +180,18 @@ CREATE INDEX IF NOT EXISTS idx_conversations_client ON conversations(client_id, 
 # в старых строках заполнить нечем.
 _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("carts", "reminded_at", "TEXT"),
+    ("product_photos", "content_hash", "TEXT"),
+]
+
+
+# Индексы по колонкам из _ADDED_COLUMNS. В основную схему их положить нельзя:
+# она выполняется раньше ALTER TABLE, и на старой базе индекс по ещё не
+# добавленной колонке уронил бы запуск.
+_ADDED_INDEXES: list[str] = [
+    # По нему проверяется «такое фото у товара уже есть»: двойное нажатие
+    # «Сохранить» и повторная отправка формы не плодят копии одной картинки.
+    "CREATE INDEX IF NOT EXISTS idx_photos_hash "
+    "ON product_photos(product_id, content_hash)",
 ]
 
 
@@ -189,6 +202,9 @@ async def _add_missing_columns(conn: aiosqlite.Connection) -> None:
         existing = {row["name"] for row in await cursor.fetchall()}
         if column not in existing:
             await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+    for statement in _ADDED_INDEXES:
+        await conn.execute(statement)
 
 
 def _lower_uni(value: str | None) -> str | None:

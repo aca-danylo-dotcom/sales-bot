@@ -14,17 +14,6 @@
       · остаток {{ product.total_stock }}
     </p>
   </div>
-  <div class="head-actions">
-    <form method="post" action="/products/{{ product.id }}/toggle">
-      <button class="btn" type="submit">{{ 'Скрыть' if product.is_active else 'Вернуть в продажу' }}</button>
-    </form>
-    {# Подтверждение — обычным confirm: страницы работают без JS, и если он
-       выключен, товар просто удалится по нажатию, а не окажется неудаляемым. #}
-    <form method="post" action="/products/{{ product.id }}/delete"
-          onsubmit="return confirm('Удалить товар вместе с вариантами и фото?')">
-      <button class="btn danger-btn" type="submit">Удалить</button>
-    </form>
-  </div>
 </div>
 
 {# Одна форма на всю карточку. Она объявлена пустой, а поля разбросаны по
@@ -190,8 +179,32 @@
       <span>Добавить фото</span>
       <input form="card" type="file" name="photo" accept="image/*" multiple>
     </label>
-    <span class="muted small">Файлы загрузятся при сохранении.</span>
+    <span class="muted small">Файлы загрузятся при сохранении. Одно и то же фото
+      второй раз не добавится.</span>
   </div>
+</section>
+
+{# «Скрыть» и «Удалить» стоят внизу, а не в шапке: сверху они попадались под
+   палец при заходе в карточку, а нужны в самом конце — когда товар уже
+   посмотрели. Это отдельные формы, поэтому «Сохранить всё» их не задевает. #}
+<section class="card card-actions">
+  <h2>Товар целиком</h2>
+  <div class="row">
+    <form method="post" action="/products/{{ product.id }}/toggle">
+      <button class="btn" type="submit">{{ 'Скрыть с витрины' if product.is_active else 'Вернуть в продажу' }}</button>
+    </form>
+    {# Подтверждение — обычным confirm: страницы работают без JS, и если он
+       выключен, товар просто удалится по нажатию, а не окажется неудаляемым. #}
+    <form method="post" action="/products/{{ product.id }}/delete"
+          onsubmit="return confirm('Удалить товар вместе с вариантами и фото?')">
+      <button class="btn danger-btn" type="submit">Удалить товар</button>
+    </form>
+  </div>
+  <p class="muted small">
+    {% if product.is_active %}Скрытый товар остаётся в CRM, но клиентам не показывается.
+    {% else %}Сейчас товар скрыт — клиенты его не видят.{% endif %}
+    Удаление уносит варианты и фото и не отменяется.
+  </p>
 </section>
 
 {# Панель липнет к низу экрана: карточка длинная, и мотать её до кнопки после

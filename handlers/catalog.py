@@ -1,0 +1,126 @@
+"""Каталог по кнопке «🛍 Каталог» — без участия ИИ.
+
+Раньше эта кнопка была обычным текстом и уходила в модель, а та по инструкции
+сначала уточняет запрос: чтобы увидеть товары, покупателю приходилось просить
+дважды. Здесь путь детерминированный — категории, страницы, карточка, — и
+работает он одинаково с первого нажатия.
+
+Роутер подключается ДО клиентского (bot.py): тот ловит любой текст и иначе
+перехватил бы кнопку. Карточку товара рисует общий services/cards.py — тот же,
+которым отвечает ИИ-продавец, чтобы товар выглядел одинаково на обоих путях.
+"""
+from __future__ import annotations
+
+import html
+import logging
+
+from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import StateFilter
+from aiogram.types import CallbackQuery, Message
+
+from db import queries
+from services.cards import send_product_card
+from keyboards.catalog import (
+    ALL_CATEGORIES,
+    CB_CATS,
+    CB_ITEM,
+    CB_PAGE,
+    PAGE_SIZE,
+    categories_kb,
+    products_kb,
+)
+from keyboards.menus import BTN_CATALOG
+
+logger = logging.getLogger(__name__)
+router = Router(name="catalog")
+
+
+async def _categories_view() -> tuple[str, object | None]:
+    """Текст и кнопки первого экрана каталога."""
+    categories = await queries.get_categories()
+    if not categories and not await queries.count_products(status="active"):
+        return "Каталог пока пуст — товары вот-вот появятся.", None
+    return "Выберите, что посмотреть:", categories_kb(categories)
+
+
+async def _page_view(category_index: int, page: int) -> tuple[str, object | None]:
+    """Текст и кнопки страницы списка товаров.
+
+    Номер категории приходит из callback_data и мог устареть (товар сняли с
+    витрины — категория исчезла). Проверяем границы и честно возвращаем клиента
+    к списку категорий, а не показываем чужую.
+    """
+    category: str | None = None
+    if category_index != ALL_CATEGORIES:
+        categories = await queries.get_categories()
+        if not 0 <= category_index < len(categories):
+            return "Каталог обновился — выберите заново:", categories_kb(categories)
+        category = categories[category_index]
+
+    total = await queries.count_products(category=category, status="active", in_stock=True)
+    products = await queries.list_products(
+        category=category, status="active", in_stock=True,
+        limit=PAGE_SIZE, offset=page * PAGE_SIZE,
+    )
+    if not products:
+        where = f"В категории «{html.escape(category)}»" if category else "В каталоге"
+        return (f"{where} сейчас всё разобрали. Загляните в другую категорию — "
+                f"или напишите, что ищете, и я поищу под заказ.",
+                products_kb([], category_index=category_index, page=0, total=0))
+
+    first = page * PAGE_SIZE + 1
+    head = html.escape(category) if category else "Все товары"
+    return (
+        f"<b>{head}</b>\n{first}–{first + len(products) - 1} из {total}. "
+        f"Нажмите на товар — покажу фото и размеры.",
+        products_kb(products, category_index=category_index, page=page, total=total),
+    )
+
+
+async def _replace(callback: CallbackQuery, text: str, markup) -> None:
+    """Переписывает сообщение со списком; если правка не прошла — шлёт новое.
+
+    Правка невозможна, когда кнопки висят под фотографией товара: у такого
+    сообщения нет текста.
+    """
+    try:
+        await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    except TelegramBadRequest:
+        await callback.message.answer(text, reply_markup=markup, parse_mode="HTML")
+
+
+@router.message(StateFilter(None), F.text == BTN_CATALOG)
+async def open_catalog(message: Message) -> None:
+    await queries.ensure_client(message.from_user.id)
+    text, markup = await _categories_view()
+    await message.answer(text, reply_markup=markup, parse_mode="HTML")
+
+
+@router.callback_query(F.data == CB_CATS)
+async def back_to_categories(callback: CallbackQuery) -> None:
+    text, markup = await _categories_view()
+    await _replace(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(f"{CB_PAGE}:"))
+async def show_page(callback: CallbackQuery) -> None:
+    _, _, category_index, page = callback.data.split(":", 3)
+    text, markup = await _page_view(int(category_index), int(page))
+    await _replace(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(f"{CB_ITEM}:"))
+async def show_item(callback: CallbackQuery) -> None:
+    product_id = int(callback.data.split(":")[2])
+    product = await queries.get_product_full(product_id)
+    if not product or not product["is_active"]:
+        await callback.answer("Этого товара уже нет в продаже", show_alert=True)
+        return
+
+    # Карточку шлём новым сообщением, а список оставляем на месте: клиент
+    # смотрит товары подряд и возвращается к перечню без лишних нажатий.
+    await send_product_card(callback.message, product)
+    await callback.answer()

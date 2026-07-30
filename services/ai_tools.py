@@ -326,12 +326,12 @@ def build_executor(ctx: ClientContext):
             asked = " ".join(part for part in (size, color) if part)
             result["asked"] = {"size": size, "color": color, "available": False}
             result["note"] = (
-                f"«{asked}» нет ни у одного товара из выдачи. Ответь коротко и "
-                "прямо: такого размера или цвета сейчас нет в наличии. НЕ "
-                "перечисляй найденные товары, не называй их по названиям и не "
-                "предлагай «показать что-то из этого» — ни один из них клиенту "
-                "не подходит, и список в ответ на отказ читается как отписка. "
-                "Одного-двух предложений достаточно."
+                f"«{asked}» нет ни у одного товара из выдачи. Ответ — РОВНО "
+                "ОДНО предложение: такого размера или цвета сейчас нет. Всё "
+                "остальное лишнее: не перечисляй найденные товары, не называй "
+                "их по названиям, не предлагай «показать что-то из этого» и не "
+                "подставляй соседние размеры — ни один из них клиенту не "
+                "подходит, и любая добавка к отказу читается как отписка."
             )
         if not products:
             # Пустой результат — самый рискованный момент: без подсказки модель
@@ -376,7 +376,12 @@ def build_executor(ctx: ClientContext):
         in_stock = [v for v in matched if v["stock"] > 0]
         in_stock_ids = {v["id"] for v in in_stock}
 
-        ctx.show(product["id"])
+        # Карточка — ответ «да, есть»: фото, цена, размеры, кнопка. На «а 45-й
+        # есть?», когда его нет, она только путает — клиент видит вещь, которую
+        # не купит. Нет спрошенного размера — нет и карточки.
+        if in_stock:
+            ctx.show(product["id"])
+
         payload = {
             "status": "in_stock" if in_stock else ("out_of_stock" if matched else "no_such_variant"),
             "product_id": product["id"],
@@ -391,6 +396,14 @@ def build_executor(ctx: ClientContext):
                 if v["stock"] > 0 and v["id"] not in in_stock_ids
             ][:_MAX_VARIANTS],
         }
+        if not in_stock and (size or color):
+            asked = " ".join(part for part in (size, color) if part)
+            payload["note"] = (
+                f"«{asked}» у этого товара нет. Ответ — РОВНО ОДНО предложение: "
+                "такого размера или цвета сейчас нет. Из alternatives ничего не "
+                "предлагай по своей воле — они пригодятся, только если клиент "
+                "сам спросит, что есть взамен."
+            )
         return _dump(payload)
 
     async def _add_to_cart(args: dict) -> str:

@@ -14,19 +14,20 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from services.format import money
-
 CB_CATS = "cat:home"     # вернуться к списку категорий
-CB_PAGE = "cat:p"        # cat:p:<номер категории>:<страница> — список товаров
-CB_ITEM = "cat:i"        # cat:i:<product_id> — показать карточку
+CB_PAGE = "cat:p"        # cat:p:<номер категории>:<страница> — товары карточками
+# cat:i:<product_id> — показать карточку. Кнопок с этим префиксом бот больше не
+# рисует, но они остались в старых сообщениях у клиентов: хендлер живёт ради них.
+CB_ITEM = "cat:i"
 
 # Номер «категории» для варианта «Всё подряд»: отдельным значением, чтобы не
 # заводить второй callback и не разбирать в хендлере два формата.
 ALL_CATEGORIES = -1
 
-# Сколько товаров на странице. Больше — и список кнопок перестаёт помещаться на
-# экран телефона целиком, а именно ради «увидел всё сразу» каталог и делался.
-PAGE_SIZE = 8
+# Сколько товаров на странице. Категория открывается карточками — с фото, ценой
+# и кнопкой у каждой, — поэтому страница короче списка кнопок: пять сообщений
+# подряд человек ещё пролистывает, восемь превращаются в ленту спама.
+PAGE_SIZE = 5
 
 
 def categories_kb(categories: list[str]) -> InlineKeyboardMarkup:
@@ -39,25 +40,14 @@ def categories_kb(categories: list[str]) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def products_kb(
-    products: list[dict], *, category_index: int, page: int, total: int
-) -> InlineKeyboardMarkup:
-    """Страница списка: товары кнопками, под ними — перелистывание.
+def nav_kb(*, category_index: int, page: int, total: int) -> InlineKeyboardMarkup:
+    """Перелистывание под карточками категории.
 
-    В подписи кнопки цена: без неё клиент открывает карточки подряд, чтобы
-    сравнить, и каждое открытие — отдельное сообщение с фото.
+    Кнопок товаров здесь больше нет: сами товары пришли карточками выше, и
+    список названий поверх них — второй раз одно и то же.
     """
     kb = InlineKeyboardBuilder()
     rows: list[int] = []
-    for product in products:
-        title = product["title"]
-        if len(title) > 30:
-            title = title[:29] + "…"
-        kb.button(
-            text=f"{title} — {money(product['price'])}",
-            callback_data=f"{CB_ITEM}:{product['id']}",
-        )
-        rows.append(1)
 
     nav = 0
     if page > 0:

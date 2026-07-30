@@ -28,7 +28,7 @@ from keyboards.catalog import (
     CB_PAGE,
     PAGE_SIZE,
     categories_kb,
-    products_kb,
+    nav_kb,
 )
 from keyboards.menus import BTN_CATALOG
 
@@ -101,8 +101,12 @@ async def _categories_view() -> tuple[str, object | None]:
     return "Выберите, что посмотреть:", categories_kb(categories)
 
 
-async def _page_view(category_index: int, page: int) -> tuple[str, object | None]:
-    """Текст и кнопки страницы списка товаров.
+async def _show_page(callback: CallbackQuery, category_index: int, page: int) -> None:
+    """Показывает страницу категории: заголовок, карточки товаров, перелистывание.
+
+    Раньше здесь был список названий кнопками, и до фото с ценой клиент доходил
+    в два нажатия. Теперь товары приходят сразу карточками — то же, что видит
+    покупатель у ИИ-продавца.
 
     Номер категории приходит из callback_data и мог устареть (товар сняли с
     витрины — категория исчезла). Проверяем границы и честно возвращаем клиента
@@ -112,7 +116,9 @@ async def _page_view(category_index: int, page: int) -> tuple[str, object | None
     if category_index != ALL_CATEGORIES:
         categories = await queries.get_categories()
         if not 0 <= category_index < len(categories):
-            return "Каталог обновился — выберите заново:", categories_kb(categories)
+            await _replace(callback, "Каталог обновился — выберите заново:",
+                           categories_kb(categories))
+            return
         category = categories[category_index]
 
     total = await queries.count_products(category=category, status="active", in_stock=True)
@@ -122,16 +128,33 @@ async def _page_view(category_index: int, page: int) -> tuple[str, object | None
     )
     if not products:
         where = f"В категории «{html.escape(category)}»" if category else "В каталоге"
-        return (f"{where} сейчас всё разобрали. Загляните в другую категорию — "
-                f"или напишите, что ищете, и я поищу под заказ.",
-                products_kb([], category_index=category_index, page=0, total=0))
+        await _replace(
+            callback,
+            f"{where} сейчас всё разобрали. Загляните в другую категорию — "
+            f"или напишите, что ищете, и я поищу под заказ.",
+            nav_kb(category_index=category_index, page=0, total=0),
+        )
+        return
 
     first = page * PAGE_SIZE + 1
     head = html.escape(category) if category else "Все товары"
-    return (
-        f"<b>{head}</b>\n{first}–{first + len(products) - 1} из {total}. "
-        f"Нажмите на товар — покажу фото и размеры.",
-        products_kb(products, category_index=category_index, page=page, total=total),
+    # Заголовок ставим на место сообщения, по которому нажали: кнопки категорий
+    # (или прошлое перелистывание) уходят, а карточки идут следом.
+    await _replace(
+        callback,
+        f"<b>{head}</b>\n{first}–{first + len(products) - 1} из {total}",
+        None,
+    )
+    for product in products:
+        # Список даёт только шапку товара, а карточке нужны размеры и фото.
+        full = await queries.get_product_full(product["id"])
+        if full:
+            await send_product_card(callback.message, full)
+
+    shown = first + len(products) - 1
+    tail = "Это все товары." if shown >= total else f"Показал {shown} из {total}."
+    await callback.message.answer(
+        tail, reply_markup=nav_kb(category_index=category_index, page=page, total=total)
     )
 
 
@@ -165,9 +188,10 @@ async def back_to_categories(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith(f"{CB_PAGE}:"))
 async def show_page(callback: CallbackQuery) -> None:
     _, _, category_index, page = callback.data.split(":", 3)
-    text, markup = await _page_view(int(category_index), int(page))
-    await _replace(callback, text, markup)
+    # Отвечаем сразу: карточек может быть пять, и Telegram успеет показать
+    # клиенту «часики» на кнопке, пока они уходят.
     await callback.answer()
+    await _show_page(callback, int(category_index), int(page))
 
 
 @router.callback_query(F.data.startswith(f"{CB_ITEM}:"))

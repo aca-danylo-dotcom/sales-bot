@@ -304,24 +304,35 @@ def build_executor(ctx: ClientContext):
             in_stock_only=args.get("in_stock_only", True) is not False,
             limit=_MAX_PRODUCTS,
         )
-        for product in products:
-            ctx.show(product["id"])
-
         result = {"products": [_product_brief(p) for p in products]}
         color = (args.get("color") or "").strip()
         size = _asked_size(args, products)
-        if products and (size or color) and not any(
+        nothing_fits = bool(products) and bool(size or color) and not any(
             _matches(v, size or None, color or None) and v.get("stock", 0) > 0
             for p in products for v in p.get("variants", [])
-        ):
-            # Поиск ослабил фильтр, чтобы показать товар вместо пустоты. Без этой
-            # оговорки модель решит, что раз товар нашёлся — нужный размер есть.
+        )
+
+        # Товары к показу помечаем, только если они и правда подходят. Поиск
+        # ослабляет фильтр, чтобы вернуть хоть что-то вместо пустоты, — и на
+        # вопрос «есть 45-й?» клиенту прилетала витрина всей обуви, в которой
+        # 45-го нет ни у одной пары. Нет подходящего — нет и карточек.
+        if not nothing_fits:
+            for product in products:
+                ctx.show(product["id"])
+
+        if nothing_fits:
+            # Без этой оговорки модель решит, что раз товар нашёлся — нужный
+            # размер есть.
             asked = " ".join(part for part in (size, color) if part)
             result["asked"] = {"size": size, "color": color, "available": False}
-            result["note"] = (f"«{asked}» в наличии нет. Первым делом скажи об этом "
-                              "прямо: такого размера или цвета сейчас нет. Только "
-                              "потом предложи то, что реально есть в in_stock, — и "
-                              "не выдавай это за то, о чём спросил клиент.")
+            result["note"] = (
+                f"«{asked}» нет ни у одного товара из выдачи. Ответь коротко и "
+                "прямо: такого размера или цвета сейчас нет в наличии. НЕ "
+                "перечисляй найденные товары, не называй их по названиям и не "
+                "предлагай «показать что-то из этого» — ни один из них клиенту "
+                "не подходит, и список в ответ на отказ читается как отписка. "
+                "Одного-двух предложений достаточно."
+            )
         if not products:
             # Пустой результат — самый рискованный момент: без подсказки модель
             # склонна «вспомнить» товар. Отдаём ей то, что есть на витрине,

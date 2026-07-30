@@ -115,6 +115,112 @@ def _asks_for_photo(text: str) -> bool:
     return bool(_PHOTO_REQUEST_RE.search(text))
 
 
+# Слова-связки: из них состоит подводка к карточкам («вот что есть у нас в
+# наличии»). Сами по себе они клиенту ничего не сообщают — всё, что он должен
+# узнать, стоит в карточке ниже.
+_LEAD_IN_WORDS = frozenset({
+    "а", "в", "вам", "вот", "все", "всі", "выбирай", "глянь", "готов", "давай",
+    "держи", "для", "доступны", "друг", "есть", "є", "ж", "же", "и", "из", "или",
+    "их", "й", "к", "как", "которые", "лежат", "лишились", "могу", "можно", "на",
+    "наличии", "наличия", "наявності", "нас", "но", "ниже", "ну",
+    "оба", "обе", "они", "остались", "от", "по", "под", "подойдут", "показываю",
+    "посмотри", "предложить", "прямо", "с", "сейчас", "смотри", "так", "также",
+    "та", "тебе", "тобі", "тут", "у", "уже", "фото", "что", "щас", "это",
+    "этого", "эти",
+    # Цена и валюта: в карточке они стоят отдельной строкой.
+    "грн", "uah", "за", "цена", "ціна", "стоит", "коштує", "размер", "розмір",
+    "размеры", "розміри",
+})
+
+# Сколько «своих» слов сверх названий и связок ещё оставляют предложение
+# подводкой. Одно — запас на категорию, которую бот почти всегда упоминает («из
+# кроссовок», «по обуви»); двух слов хватает уже на рассказ о товаре («лёгкие,
+# для бега»), а описание в карточку не входит, и терять его нельзя.
+_LEAD_IN_TOLERANCE = 1
+
+# Номер строки в перечне: «1.» и «2)» — оформление списка, а не сказанное число.
+_LIST_NUMBER_RE = re.compile(r"^\s*\d+[.)]\s*", re.MULTILINE)
+
+_DIGITS_RE = re.compile(r"\d+")
+
+
+def _card_numbers(products: list[dict]) -> set[str]:
+    """Числа, которые клиент и так прочитает в карточках: цены, размеры, остатки."""
+    numbers: set[str] = set()
+    for product in products:
+        numbers |= set(_DIGITS_RE.findall(f"{product['price']:g}"))
+        for variant in product["variants"]:
+            numbers |= set(_DIGITS_RE.findall(f"{variant['size']} {variant['stock']}"))
+    return numbers
+
+
+# Одно предложение: разбираем ответ по частям, а не целиком.
+_SENTENCE_RE = re.compile(r"[^.!?…]+[.!?…]*")
+
+
+def _adds_nothing(reply: str, products: list[dict]) -> bool:
+    """Кусок ответа — только подводка к карточкам, без собственного содержания?
+
+    Клиент жаловался на лишнее сообщение перед фотографиями: бот перечислял
+    товары с ценами, а следом приходили те же товары карточками — название,
+    цена, размеры и кнопка «В корзину» в них уже есть. Такой текст ничего не
+    добавляет, и мы его не отправляем: остаются одни карточки.
+
+    Отправить всё же нужно, когда бот сказал что-то своё: задал вопрос, назвал
+    число, которого в карточках нет (скидка, срок доставки), или добавил слова
+    помимо названий товаров и служебных связок — описание в карточку не входит,
+    и рассказ про товар клиент должен увидеть. Ошибиться безопаснее в сторону
+    «отправить»: пропавший вопрос оставит клиента без ответа, а лишняя строка —
+    просто лишняя строка.
+    """
+    if not products:
+        return False
+    if "?" in reply:
+        return False
+
+    body = _LIST_NUMBER_RE.sub("", reply)
+    if set(_DIGITS_RE.findall(body)) - _card_numbers(products):
+        return False
+
+    title_words = {word for product in products for word in _title_words(product["title"])}
+    own = [
+        word for word in _WORD_RE.findall(body.lower())
+        if not any(char.isdigit() for char in word)
+        and word not in title_words and word not in _LEAD_IN_WORDS
+    ]
+    return len(own) <= _LEAD_IN_TOLERANCE
+
+
+def _strip_lead_in(reply: str, products: list[dict]) -> str:
+    """Убирает из ответа перечень товаров, оставляя всё остальное.
+
+    Целиком ответ отбрасывать нельзя: к перечню бот часто добавляет полезное —
+    «Какой размер ищешь?». Поэтому смотрим предложение за предложением и
+    выбрасываем только те, что называют товар и ничего к карточке не добавляют.
+    Предложение без названия не трогаем никогда: это уже разговор, а не витрина.
+    """
+    if not products:
+        return reply
+
+    title_words = {word for product in products for word in _title_words(product["title"])}
+    lines = []
+    for line in reply.split("\n"):
+        # Номер пункта отделяем сразу: точка в «1.» — оформление списка, по ней
+        # нельзя резать на предложения. Пустой пункт потом уходит целиком.
+        number = _LIST_NUMBER_RE.match(line)
+        prefix, rest = (number.group(0), line[number.end():]) if number else ("", line)
+        kept = [
+            part for part in _SENTENCE_RE.findall(rest)
+            if not (
+                title_words & set(_WORD_RE.findall(part.lower()))
+                and _adds_nothing(part, products)
+            )
+        ]
+        body = "".join(kept).strip()
+        lines.append(prefix + body if body else "")
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 def _clean_markup(text: str) -> str:
     """Убирает markdown-разметку и маркеры списков из ответа ИИ.
 
@@ -240,22 +346,29 @@ async def _run_and_reply(message: Message, bot: Bot) -> None:
         return
 
     reply = _clean_markup(text).strip()
+    # Карточки выбираем до отправки текста: перечень товаров из него вырезаем, и
+    # если сверх перечня ничего не сказано — уходят одни карточки. Товар в
+    # корзине карточки не требует: она
+    # про то, что уже лежит в корзине, и кнопка «В корзину» под ней только путает.
+    cards = [] if ctx.cart_added else await _cards_to_send(message, ctx, reply)
+
     if reply:
-        # Товар уехал в корзину — под ответом нужен следующий шаг, а не нижнее
-        # меню: те же кнопки, что и при добавлении из каталога.
-        await message.answer(
-            reply, reply_markup=added_kb() if ctx.cart_added else main_menu()
-        )
+        visible = _strip_lead_in(reply, cards)
+        if visible:
+            # Товар уехал в корзину — под ответом нужен следующий шаг, а не нижнее
+            # меню: те же кнопки, что и при добавлении из каталога.
+            await message.answer(
+                visible, reply_markup=added_kb() if ctx.cart_added else main_menu()
+            )
+        # В историю пишем в любом случае: для модели это её ответ, даже если
+        # клиент прочитал его в виде карточек.
         await queries.add_message(user_id, "assistant", reply)
         await queries.trim_history(user_id, _KEEP_HISTORY)
+    elif ctx.cart_added:
+        await message.answer("Положил в корзину.", reply_markup=added_kb())
 
-    if ctx.cart_added:
-        # Карточку не шлём вовсе: она про товар, который уже лежит в корзине, и
-        # кнопка «В корзину» под ней клиента только путает.
-        if not reply:
-            await message.answer("Положил в корзину.", reply_markup=added_kb())
-    else:
-        await _send_cards(message, ctx, reply)
+    for product in cards:
+        await send_product_card(message, product)
 
     # Обращение закрыл бот. started_at — когда клиент отправил сообщение, так что
     # во «время ответа» попадает и ожидание на блокировке пользователя.
@@ -317,8 +430,8 @@ def _mentioned_positions(titles: dict[int, str], reply: str) -> dict[int, int]:
     return positions
 
 
-async def _send_cards(message: Message, ctx: ClientContext, reply: str) -> None:
-    """Досылает фото товаров, о которых консультант рассказал в этом ответе.
+async def _cards_to_send(message: Message, ctx: ClientContext, reply: str) -> list[dict]:
+    """Карточки товаров, о которых консультант рассказал в этом ответе.
 
     Инструменты фото не отправляют (модель их не видит) — они лишь помечают
     товары в ctx.show_products, а список хранит каждый товар один раз, поэтому
@@ -332,6 +445,9 @@ async def _send_cards(message: Message, ctx: ClientContext, reply: str) -> None:
 
     Порядок карточек — как в ответе: клиент читает «есть кроссовки и перчатки» и
     ниже видит их в том же порядке.
+
+    Возвращаем список, а не отправляем сразу: по нему хендлер решает, нужно ли
+    вообще слать текст ответа — см. _adds_nothing.
 
     Сама карточка живёт в services/cards.py: её же показывает каталог по
     кнопке, и выглядеть они обязаны одинаково.
@@ -352,6 +468,5 @@ async def _send_cards(message: Message, ctx: ClientContext, reply: str) -> None:
         ordered = [pid for pid in ordered if pid not in seen]
 
     ordered = ordered[:MAX_CARDS]
-    for product_id in ordered:
-        await send_product_card(message, products[product_id])
     await queries.remember_shown_cards(message.from_user.id, ordered)
+    return [products[product_id] for product_id in ordered]

@@ -24,10 +24,11 @@ CB_ITEM = "cat:i"
 # заводить второй callback и не разбирать в хендлере два формата.
 ALL_CATEGORIES = -1
 
-# Сколько товаров на странице. Категория открывается карточками — с фото, ценой
-# и кнопкой у каждой, — поэтому страница короче списка кнопок: пять сообщений
-# подряд человек ещё пролистывает, восемь превращаются в ленту спама.
-PAGE_SIZE = 5
+# Категорию показываем целиком: сколько товаров в ней есть, столько карточек и
+# уходит. Число ниже — не страница, а потолок на случай, когда товаров в
+# категории неожиданно много: тридцать сообщений подряд Telegram отдаёт нормально,
+# а сотня заливает чат. Дальше — по кнопке «Показать ещё».
+PAGE_SIZE = 30
 
 
 def categories_kb(categories: list[str]) -> InlineKeyboardMarkup:
@@ -40,27 +41,13 @@ def categories_kb(categories: list[str]) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def nav_kb(*, category_index: int, page: int, total: int) -> InlineKeyboardMarkup:
-    """Перелистывание под карточками категории.
+def more_kb(*, category_index: int, page: int) -> InlineKeyboardMarkup:
+    """Одна кнопка — дослать остаток категории.
 
-    Кнопок товаров здесь больше нет: сами товары пришли карточками выше, и
-    список названий поверх них — второй раз одно и то же.
+    Ни списка товаров, ни «назад»: карточки уже лежат в переписке выше, а к
+    категориям возвращает кнопка «🛍 Каталог» под полем ввода — она на экране
+    всегда.
     """
     kb = InlineKeyboardBuilder()
-    rows: list[int] = []
-
-    nav = 0
-    if page > 0:
-        kb.button(text="‹ Назад", callback_data=f"{CB_PAGE}:{category_index}:{page - 1}")
-        nav += 1
-    if (page + 1) * PAGE_SIZE < total:
-        kb.button(text="Ещё ›", callback_data=f"{CB_PAGE}:{category_index}:{page + 1}")
-        nav += 1
-    if nav:
-        rows.append(nav)
-
-    kb.button(text="↩️ К категориям", callback_data=CB_CATS)
-    rows.append(1)
-
-    kb.adjust(*rows)
+    kb.button(text="Показать ещё", callback_data=f"{CB_PAGE}:{category_index}:{page}")
     return kb.as_markup()

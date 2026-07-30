@@ -565,24 +565,40 @@ async def _known_delivery(client_id: int) -> dict:
     """Данные доставки, которые бот уже знает про этого клиента.
 
     Последний заказ важнее профиля: в заказ данные попали через эту же форму —
-    их проверял код, и именно по ним уехала посылка. В профиле же могло осесть
-    то, что дописал ИИ в разговоре, поэтому он идёт запасным вариантом.
+    их проверял код, и именно по ним уехала посылка. Поэтому заказ берётся как
+    есть: перепроверять имя, которое форма уже приняла, нельзя. Проверка имён
+    приблизительная и живого человека узнаёт не всегда — на трёх попытках форма
+    принимает что дали, и такое имя обнулялось здесь, а клиент из-за одной этой
+    строчки снова получал все четыре вопроса.
 
-    Сомнительное отсеиваем: отделение без номера и «имя», не похожее на имя, —
-    не то, что можно подставить за клиента. Пустое поле просто спросим.
+    Из профиля добираем только то, чего в заказе не нашлось, и вот его как раз
+    фильтруем: туда мог что-то записать ИИ по ходу разговора.
+
+    Отделение без номера отсекаем в любом случае — по такой строке посылку не
+    отправить, откуда бы она ни пришла (например, из правки в веб-CRM).
     """
-    client = await queries.get_client(client_id) or {}
     orders = await queries.get_client_orders(client_id, 1)
     last = orders[0] if orders else {}
-    profile = {
-        field: str(last.get(field) or client.get(field) or "").strip()
-        for field in _PROFILE_FIELDS
-    }
-    if profile["np_branch"] and not _BRANCH_DIGIT_RE.search(profile["np_branch"]):
-        profile["np_branch"] = ""
-    if profile["name"] and not looks_like_name(profile["name"]):
-        profile["name"] = ""
-    return profile
+    known = {field: str(last.get(field) or "").strip() for field in _PROFILE_FIELDS}
+
+    client = await queries.get_client(client_id) or {}
+    for field in _PROFILE_FIELDS:
+        if known[field]:
+            continue
+        value = str(client.get(field) or "").strip()
+        if field == "name" and value and not looks_like_name(value):
+            value = ""
+        known[field] = value
+
+    if known["np_branch"] and not _BRANCH_DIGIT_RE.search(known["np_branch"]):
+        known["np_branch"] = ""
+
+    missing = [field for field in _PROFILE_FIELDS if not known[field]]
+    if missing and last:
+        # В логах видно, почему постоянному покупателю всё же досталась форма.
+        logger.info("Заказ %s клиента %s без полей доставки: %s",
+                    last.get("id"), client_id, ", ".join(missing))
+    return known
 
 
 async def _start_checkout(message: Message, state: FSMContext, client_id: int,

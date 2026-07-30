@@ -259,7 +259,9 @@ class ClientContext:
     client_id: int
     # Товары, о которых зашла речь: хендлер отправит по ним карточки с фото.
     show_products: list[int] = field(default_factory=list)
-    cart_changed: bool = False
+    # Товар уехал в корзину этим ходом: хендлер подставит под ответ кнопки
+    # «Корзина / Оформить заказ» — те же, что и при добавлении из каталога.
+    cart_added: bool = False
 
     def show(self, product_id: int | None) -> None:
         """Помечает товар к показу. Повторы игнорируются — фото не дублируются."""
@@ -403,7 +405,7 @@ def build_executor(ctx: ClientContext):
                           "title": variant["title"], "size": variant["size"],
                           "color": variant["color"]})
 
-        ctx.cart_changed = True
+        ctx.cart_added = True
         # Та же цель, что у кнопки в handlers/orders.py, но с source='ai': в
         # дашборде видно, сколько корзин собрал разговор, а сколько — каталог.
         agent_stats.report_goal(
@@ -444,7 +446,6 @@ def build_executor(ctx: ClientContext):
         if variant_id is None:
             return _dump({"status": "error", "reason": "no_variant_id"})
         await queries.remove_from_cart(client_id, int(variant_id))
-        ctx.cart_changed = True
         cart = await queries.get_cart(client_id)
         return _dump({"status": "ok", "cart_count": cart["count"], "cart_total": cart["total"]})
 

@@ -168,6 +168,20 @@ CREATE TABLE IF NOT EXISTS conversations (
 
 CREATE INDEX IF NOT EXISTS idx_conversations_client ON conversations(client_id, id);
 
+-- === Показанные карточки товаров ===
+-- Какие карточки (фото, цена, размеры) клиент уже видел. Без этой памяти бот
+-- досылал карточку на КАЖДЫЙ ответ, где назван товар, — а название он обязан
+-- называть точно, иначе не уйдёт фото. Клиент писал «43», получал ту же
+-- карточку по третьему разу. В БД, а не в памяти процесса: после деплоя
+-- разговор продолжается, и повтор был бы ровно там, где он раздражает.
+
+CREATE TABLE IF NOT EXISTS shown_cards (
+    client_id  INTEGER NOT NULL REFERENCES clients(telegram_id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    shown_at   TEXT    NOT NULL,
+    PRIMARY KEY (client_id, product_id)
+);
+
 -- Таблицы пользователей здесь нет: веб-CRM работает без входа, учётные записи
 -- заводить некому и незачем. Если вход когда-нибудь понадобится, таблица
 -- добавляется сюда же — старые базы её подхватят при следующем запуске.

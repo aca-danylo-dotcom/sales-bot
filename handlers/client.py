@@ -29,6 +29,7 @@ from services.ai_tools import MAX_CARDS, TOOLS, ClientContext, build_executor
 from services.cards import send_product_card
 from services.prompts import build_instructions
 from keyboards.menus import main_menu
+from keyboards.orders import added_kb
 
 logger = logging.getLogger(__name__)
 router = Router(name="client")
@@ -58,6 +59,12 @@ _user_warned: dict[int, float] = {}
 # Максимум символов во входящем сообщении: каждый символ — токены в платный ИИ.
 # Лимит щедрый — живой покупатель его не заметит, а намеренный раздув отсекается.
 _MAX_INPUT_CHARS = 1000
+
+# Через сколько часов карточку товара можно показать тому же клиенту заново.
+# В пределах одного разговора повтор не нужен — фото и цена видны выше в
+# переписке. Но человек, вернувшийся на следующий день, листать вверх не станет,
+# поэтому память о показанном протухает.
+_CARD_REPEAT_HOURS = 12
 
 
 def _get_lock(user_id: int) -> asyncio.Lock:
@@ -94,6 +101,18 @@ _WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
 
 # Слова, которые сами по себе товар не опознают: они есть в половине названий.
 _TITLE_STOP_WORDS = frozenset({"для", "від", "или", "под", "про", "the", "and", "with"})
+
+# Прямая просьба показать фото — единственный повод прислать карточку повторно.
+# Список нарочно узкий: одно только «покажи» сюда не входит, иначе «покажи 43-й»
+# снова тащило бы карточку, от чего мы и уходим.
+_PHOTO_REQUEST_RE = re.compile(
+    r"фот|картинк|изображен|зображен|снимок|снимк|как выглядит|як вигляда", re.IGNORECASE
+)
+
+
+def _asks_for_photo(text: str) -> bool:
+    """Клиент сам попросил фото — тогда повтор карточки уместен."""
+    return bool(_PHOTO_REQUEST_RE.search(text))
 
 
 def _clean_markup(text: str) -> str:
@@ -222,11 +241,21 @@ async def _run_and_reply(message: Message, bot: Bot) -> None:
 
     reply = _clean_markup(text).strip()
     if reply:
-        await message.answer(reply, reply_markup=main_menu())
+        # Товар уехал в корзину — под ответом нужен следующий шаг, а не нижнее
+        # меню: те же кнопки, что и при добавлении из каталога.
+        await message.answer(
+            reply, reply_markup=added_kb() if ctx.cart_added else main_menu()
+        )
         await queries.add_message(user_id, "assistant", reply)
         await queries.trim_history(user_id, _KEEP_HISTORY)
 
-    await _send_cards(message, ctx, reply)
+    if ctx.cart_added:
+        # Карточку не шлём вовсе: она про товар, который уже лежит в корзине, и
+        # кнопка «В корзину» под ней клиента только путает.
+        if not reply:
+            await message.answer("Положил в корзину.", reply_markup=added_kb())
+    else:
+        await _send_cards(message, ctx, reply)
 
     # Обращение закрыл бот. started_at — когда клиент отправил сообщение, так что
     # во «время ответа» попадает и ожидание на блокировке пользователя.
@@ -295,6 +324,12 @@ async def _send_cards(message: Message, ctx: ClientContext, reply: str) -> None:
     товары в ctx.show_products, а список хранит каждый товар один раз, поэтому
     в одном ответе одна и та же карточка не задваивается.
 
+    Между сообщениями карточку не повторяем: клиент уточняет размер, модель в
+    ответе обязана назвать товар по названию (иначе фото не уходит вообще) — и
+    раньше на каждую такую реплику прилетала та же карточка по новому кругу.
+    Что уже показано, помнит таблица shown_cards; повтор возможен, только если
+    клиент прямо попросил фото или вернулся к товару спустя _CARD_REPEAT_HOURS.
+
     Порядок карточек — как в ответе: клиент читает «есть кроссовки и перчатки» и
     ниже видит их в том же порядке.
 
@@ -310,6 +345,13 @@ async def _send_cards(message: Message, ctx: ClientContext, reply: str) -> None:
     positions = _mentioned_positions(
         {pid: product["title"] for pid, product in products.items()}, reply
     )
-    ordered = sorted(positions.items(), key=lambda item: item[1])
-    for product_id, _ in ordered[:MAX_CARDS]:
+    ordered = [pid for pid, _ in sorted(positions.items(), key=lambda item: item[1])]
+
+    if not _asks_for_photo(message.text or ""):
+        seen = await queries.get_shown_cards(message.from_user.id, _CARD_REPEAT_HOURS)
+        ordered = [pid for pid in ordered if pid not in seen]
+
+    ordered = ordered[:MAX_CARDS]
+    for product_id in ordered:
         await send_product_card(message, products[product_id])
+    await queries.remember_shown_cards(message.from_user.id, ordered)

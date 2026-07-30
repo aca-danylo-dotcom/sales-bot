@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 from typing import Any, Iterable
 
 import config
@@ -1663,5 +1664,48 @@ async def trim_history(client_id: int, keep: int = 200) -> None:
                    ORDER BY id DESC LIMIT ?
                )""",
             (client_id, client_id, keep),
+        )
+        await conn.commit()
+
+
+# ─────────────────────── Показанные карточки ───────────────────────
+
+
+async def get_shown_cards(client_id: int, hours: int) -> set[int]:
+    """id товаров, чьи карточки клиент уже видел за последние `hours` часов.
+
+    По ним хендлер понимает, что фото и цену слать заново не нужно: клиент
+    видит их выше в переписке, и повтор выглядит как заедание бота.
+    """
+    since = (config.now_local() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT product_id FROM shown_cards WHERE client_id = ? AND shown_at >= ?",
+            (client_id, since),
+        )
+        return {row["product_id"] for row in await cursor.fetchall()}
+
+
+async def remember_shown_cards(client_id: int, product_ids: Iterable[int]) -> None:
+    """Отмечает карточки как показанные (повторный показ обновляет время).
+
+    Заодно чистит записи старше суток: держать их дольше незачем — окно
+    «не повторять» короче, а таблица иначе растёт на каждый товар и клиента.
+    """
+    ids = list(product_ids)
+    if not ids:
+        return
+
+    now = config.now_str()
+    stale = (config.now_local() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    async with get_connection() as conn:
+        await conn.executemany(
+            "INSERT INTO shown_cards (client_id, product_id, shown_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(client_id, product_id) DO UPDATE SET shown_at = excluded.shown_at",
+            [(client_id, int(pid), now) for pid in ids],
+        )
+        await conn.execute(
+            "DELETE FROM shown_cards WHERE client_id = ? AND shown_at < ?",
+            (client_id, stale),
         )
         await conn.commit()

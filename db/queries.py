@@ -493,6 +493,57 @@ async def get_all_categories() -> list[str]:
         return [row["category"] for row in await cursor.fetchall()]
 
 
+async def get_showcase(limit: int = 60) -> list[dict]:
+    """Витрина одним запросом: видимые товары и размеры, которые есть сейчас.
+
+    Нужна ИИ-продавцу в системном промпте. Без неё модель узнаёт ассортимент
+    только если сама решит вызвать поиск — и на короткую реплику «хочу 45-й»
+    соглашается с размером, которого в магазине нет. Со витриной перед глазами
+    она видит, что у кроссовок есть только 41–44, и отвечает честно.
+
+    Товары без остатка тоже попадают в список (sizes пустой): пусть модель
+    знает, что такой товар у нас есть, но сейчас распродан.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT p.id, p.title, p.category, p.price,
+                      COALESCE((SELECT SUM(stock) FROM product_variants v
+                                WHERE v.product_id = p.id), 0) AS total_stock
+               FROM products p
+               WHERE p.is_active = 1
+               ORDER BY p.category, p.sort_order, p.id DESC
+               LIMIT ?""",
+            (limit,),
+        )
+        products = _rows(await cursor.fetchall())
+        if not products:
+            return []
+        ids = ",".join(str(p["id"]) for p in products)
+        cursor = await conn.execute(
+            f"""SELECT product_id, size, color, stock FROM product_variants
+                WHERE product_id IN ({ids}) AND stock > 0
+                ORDER BY id"""
+        )
+        variants = _rows(await cursor.fetchall())
+
+    by_product: dict[int, list[str]] = {}
+    seen: dict[int, set[str]] = {}
+    for variant in variants:
+        pid = variant["product_id"]
+        # Один размер в разных цветах — одна запись в витрине: перечислять
+        # «42, 42, 42» бессмысленно, цвета уточняются инструментом.
+        key = size_key(variant["size"])
+        # Товар без размеров (size = '') остатком считается, но в список
+        # размеров пустая строка попадать не должна.
+        if not key or key in seen.setdefault(pid, set()):
+            continue
+        seen[pid].add(key)
+        by_product.setdefault(pid, []).append(variant["size"])
+    for product in products:
+        product["sizes"] = by_product.get(product["id"], [])
+    return products
+
+
 # ─────────────────────── Варианты (размер × цвет) ───────────────────────
 
 

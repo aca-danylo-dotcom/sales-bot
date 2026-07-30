@@ -178,12 +178,16 @@ async def _run_and_reply(message: Message, bot: Bot) -> None:
     # переспрашивает уже известное и знает, что у клиента лежит в корзине.
     client = await queries.get_client(user_id)
     cart = await queries.get_cart(user_id)
+    # Витрина — там же: пока модель узнавала ассортимент только через поиск, она
+    # соглашалась с размером, которого на складе нет. Теперь список товаров и
+    # размеров в наличии у неё перед глазами на каждом сообщении.
+    showcase = await queries.get_showcase()
     conv = _history_to_conversation(await queries.get_history(user_id, _MAX_HISTORY))
 
     await bot.send_chat_action(message.chat.id, "typing")
     try:
         text = await run_agent(
-            instructions=build_instructions(client, cart["count"]),
+            instructions=build_instructions(client, cart["count"], showcase),
             conversation=conv,
             tools=TOOLS,
             tool_executor=build_executor(ctx),

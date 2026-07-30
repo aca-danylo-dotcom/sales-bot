@@ -37,9 +37,17 @@ PAGE_SIZE = 20
 # Что показать после действия. Текст держим здесь, в адресе — только ключ.
 MESSAGES = {
     "saved": "Изменения сохранены.",
+    # Скрытый товар после сохранения выглядит точно так же, как выставленный, —
+    # поэтому прямо говорим, что осталось сделать, и называем кнопку её словами.
+    "saved_hidden": "Изменения сохранены. Перепроверьте карточку и нажмите внизу "
+                    "«Выставить на продажу» — пока товар скрыт, клиенты его не видят.",
+    "published": "Сохранил и выставил товар на продажу — клиенты его видят.",
+    "published_empty": "Товар на витрине, но купить его нельзя: нет ни одного размера. "
+                       "Добавьте вариант с остатком.",
+    "unpublished": "Сохранил и скрыл товар с витрины — клиентам он больше не показывается.",
     "created": "Товар создан. Добавьте варианты и фото — без вариантов его нельзя купить.",
-    "created_ready": "Товар создан со всем, что вы заполнили. Проверьте карточку "
-                     "и верните его в продажу — пока он скрыт.",
+    "created_ready": "Товар создан со всем, что вы заполнили. Перепроверьте карточку "
+                     "и нажмите внизу «Выставить на продажу» — пока он скрыт.",
     "deleted": "Товар удалён.",
     "shown": "Товар вернулся в продажу.",
     "hidden": "Товар скрыт — клиентам он больше не показывается.",
@@ -287,13 +295,33 @@ async def product_save(request: web.Request) -> web.Response:
         if not saved and not dupes:
             err = err or "part_photo"
 
+    # Витрина — той же кнопкой, что и сохранение: «Выставить на продажу» и
+    # «Скрыть с витрины» отправляют эту же форму, поэтому поля уже записаны выше,
+    # и правки не теряются. Отдельная форма /toggle рядом с полями как раз этим и
+    # была плоха: нажал — опубликовал, а набранное ушло.
+    publish = bool(forms.text(data, "publish", max_len=4))
+    hide = bool(forms.text(data, "hide", max_len=4))
+    if publish and not product["is_active"]:
+        await queries.set_product_active(product_id, True)
+    elif hide and product["is_active"]:
+        await queries.set_product_active(product_id, False)
+
     # С «Готово» уходим в список — но только если всё прошло гладко: замечание,
     # показанное на странице, которую человек уже покинул, он не прочитает.
     if err:
         _redirect(f"/products/{product_id}", err=err)
     if forms.text(data, "finish", max_len=4):
         raise web.HTTPFound(f"/products?{urlencode({**back, 'ok': 'saved'})}")
-    _redirect(f"/products/{product_id}", ok="saved")
+
+    if publish:
+        # Товар на витрине без вариантов клиент увидит, но не купит — молчать об
+        # этом нельзя, иначе продавец узнаёт о промахе от покупателя.
+        ok = "published" if await queries.get_variants(product_id) else "published_empty"
+    elif hide:
+        ok = "unpublished"
+    else:
+        ok = "saved" if product["is_active"] else "saved_hidden"
+    _redirect(f"/products/{product_id}", ok=ok)
 
 
 def _draft_rows(data=None) -> list[dict[str, str]]:

@@ -146,16 +146,16 @@ def step_kb(keep: str | None = None, *, skip: bool = False) -> InlineKeyboardMar
 
 
 def saved_data_kb() -> InlineKeyboardMarkup:
-    """Данные с прошлого заказа: подходят как есть или что-то поменялось.
+    """Повторный заказ: оставить прошлые данные или поменять. Всё.
 
-    Показывается вместо первого вопроса формы, когда бот уже знает получателя,
-    телефон и отделение: постоянному покупателю незачем вводить одно и то же
-    четыре раза подряд.
+    Показывается вместо всей формы, когда бот уже знает получателя, телефон,
+    город и отделение. Кнопок ровно две и третьей быть не должно: смысл экрана
+    в том, что постоянный покупатель оформляет заказ одним нажатием, а не
+    подтверждает по очереди то, что и так не менялось.
     """
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Всё верно", callback_data=CB_KEEP_ALL)
-    kb.button(text="✏️ Изменить данные", callback_data=CB_RESTART)
-    kb.button(text="❌ Отменить оформление", callback_data=CB_CANCEL)
+    kb.button(text="✅ Оставить эти данные", callback_data=CB_KEEP_ALL)
+    kb.button(text="✏️ Поменять данные", callback_data=CB_RESTART)
     kb.adjust(1)
     return kb.as_markup()
 

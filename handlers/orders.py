@@ -41,6 +41,7 @@ from keyboards.orders import (
     CB_DEL,
     CB_INC,
     CB_KEEP,
+    CB_KEEP_ALL,
     CB_ORD_CANCEL,
     CB_ORD_CANCEL_OK,
     CB_ORDERS,
@@ -57,6 +58,7 @@ from keyboards.orders import (
     orders_kb,
     payment_kb,
     phone_kb,
+    saved_data_kb,
     step_kb,
     summary_kb,
     variants_pick_kb,
@@ -124,6 +126,7 @@ def _clean_phone(text: str) -> str | None:
 class Checkout(StatesGroup):
     """Шаги оформления. Порядок задаёт _NEXT_FIELD, а не сами состояния."""
 
+    saved = State()   # показали данные с прошлого заказа, ждём «Всё верно»
     name = State()
     phone = State()
     city = State()
@@ -294,6 +297,26 @@ def admin_order_text(order: dict, username: str | None = None,
         lines.append(f"Комментарий: {_esc(order['comment'])}")
     lines += ["", f"Клиент: {_esc(contact)}"]
     return "\n".join(lines)
+
+
+def _saved_data_text(profile: dict) -> str:
+    """Данные доставки с прошлого заказа — перед первым вопросом формы.
+
+    Показываем их все сразу и одним вопросом: раньше постоянный покупатель
+    четыре раза подряд жал «Оставить», хотя ничего у него не менялось.
+    """
+    return "\n".join([
+        "<b>Оформляем на прошлые данные?</b>",
+        "",
+        f"Получатель: {_esc(profile['name'])}",
+        f"Телефон: {_esc(profile['phone'])}",
+        "",
+        "<b>📦 Куда везём:</b>",
+        f"<b>{_esc(profile['city'])}, отделение {_esc(profile['np_branch'])}</b>",
+        "",
+        "Если что-то изменилось — адрес, отделение или телефон — нажмите "
+        "«Изменить данные», и заполним заново.",
+    ])
 
 
 def _summary_text(cart: dict, data: dict) -> str:
@@ -546,8 +569,39 @@ async def _show_summary(message: Message, state: FSMContext) -> None:
     )
 
 
-async def _start_checkout(message: Message, state: FSMContext, client_id: int) -> None:
-    """Проверяет корзину и запускает форму. Профиль кладём в state целиком."""
+async def _known_delivery(client_id: int) -> dict:
+    """Данные доставки, которые бот уже знает про этого клиента.
+
+    Последний заказ важнее профиля: в заказ данные попали через эту же форму —
+    их проверял код, и именно по ним уехала посылка. В профиле же могло осесть
+    то, что дописал ИИ в разговоре, поэтому он идёт запасным вариантом.
+
+    Сомнительное отсеиваем: отделение без номера и «имя», не похожее на имя, —
+    не то, что можно подставить за клиента. Пустое поле просто спросим.
+    """
+    client = await queries.get_client(client_id) or {}
+    orders = await queries.get_client_orders(client_id, 1)
+    last = orders[0] if orders else {}
+    profile = {
+        field: str(last.get(field) or client.get(field) or "").strip()
+        for field in _PROFILE_FIELDS
+    }
+    if profile["np_branch"] and not _BRANCH_DIGIT_RE.search(profile["np_branch"]):
+        profile["np_branch"] = ""
+    if profile["name"] and not looks_like_name(profile["name"]):
+        profile["name"] = ""
+    return profile
+
+
+async def _start_checkout(message: Message, state: FSMContext, client_id: int,
+                          *, offer_saved: bool = True) -> None:
+    """Проверяет корзину и запускает форму. Профиль кладём в state целиком.
+
+    Постоянному покупателю форму не показываем вовсе: все данные доставки уже
+    известны — выводим их одним сообщением и спрашиваем, менять или нет.
+    `offer_saved=False` приходит от кнопки «Изменить данные»: там как раз
+    просили форму, и повторно предлагать те же данные было бы петлёй.
+    """
     cart = await queries.get_cart(client_id)
     if not cart["items"]:
         await message.answer(
@@ -566,19 +620,18 @@ async def _start_checkout(message: Message, state: FSMContext, client_id: int) -
         )
         return
 
-    client = await queries.get_client(client_id) or {}
-    profile = {field: client.get(field) or "" for field in _PROFILE_FIELDS}
-    # У старых клиентов в профиле мог осесть адрес, который дописал ИИ (до того,
-    # как ему это запретили). Отделение без номера — заведомо не адрес: не
-    # предлагаем его кнопкой «Оставить», пусть человек напишет сам.
-    if profile["np_branch"] and not _BRANCH_DIGIT_RE.search(profile["np_branch"]):
-        profile["np_branch"] = ""
-    # То же и с именем: в профиле может лежать ник или отговорка из давнего
-    # разговора — кнопкой «Оставить» такое подставлять нельзя.
-    if profile["name"] and not looks_like_name(profile["name"]):
-        profile["name"] = ""
-
+    profile = await _known_delivery(client_id)
     await state.set_data({"profile": profile})
+
+    # Известно всё до единого поля — значит, человек у нас уже заказывал и
+    # спрашивать по кругу имя, телефон, город и отделение незачем.
+    if offer_saved and all(profile[field] for field in _PROFILE_FIELDS):
+        await state.set_state(Checkout.saved)
+        await message.answer(
+            _saved_data_text(profile), reply_markup=saved_data_kb(), parse_mode=_HTML
+        )
+        return
+
     await _ask(message, state, "name")
 
 
@@ -602,8 +655,30 @@ async def checkout_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(StateFilter(Checkout), F.data == CB_RESTART)
 async def checkout_restart(callback: CallbackQuery, state: FSMContext) -> None:
+    """«Изменить данные» / «Ввести данные заново» — обычная форма с первого шага."""
     await callback.answer()
-    await _start_checkout(callback.message, state, callback.from_user.id)
+    await _start_checkout(callback.message, state, callback.from_user.id,
+                          offer_saved=False)
+
+
+@router.callback_query(Checkout.saved, F.data == CB_KEEP_ALL)
+async def checkout_keep_all(callback: CallbackQuery, state: FSMContext) -> None:
+    """«Всё верно» — берём данные прошлого заказа целиком и идём к комментарию.
+
+    Комментарий всё же спрашиваем: он относится к этому заказу, а не к клиенту,
+    и тянуть его из прошлого нельзя.
+    """
+    await callback.answer()
+    profile = (await state.get_data()).get("profile") or {}
+    if not all(profile.get(field) for field in _PROFILE_FIELDS):
+        # Данные разъехались (например, кнопку нажали в старом сообщении) —
+        # спокойно возвращаемся к форме, а не оформляем заказ на пустоту.
+        await _start_checkout(callback.message, state, callback.from_user.id,
+                              offer_saved=False)
+        return
+
+    await state.update_data(**{field: profile[field] for field in _PROFILE_FIELDS})
+    await _ask(callback.message, state, "comment")
 
 
 async def _accept(message: Message, state: FSMContext, field: str, value: str) -> None:
@@ -659,7 +734,15 @@ async def step_phone_contact(message: Message, state: FSMContext) -> None:
 @router.message(StateFilter(Checkout), F.text)
 async def step_text(message: Message, state: FSMContext) -> None:
     """Общий обработчик текстовых ответов на шаги формы."""
-    field = _current_field(await state.get_state())
+    current = await state.get_state()
+    if current == Checkout.saved.state:
+        await message.answer(
+            "Если данные доставки те же — нажмите «Всё верно». Что-то "
+            "изменилось — «Изменить данные», и заполним заново."
+        )
+        return
+
+    field = _current_field(current)
     if not field:  # состояние confirm — ждём кнопку, а не текст
         await message.answer(
             "Проверьте заказ выше и нажмите «Всё верно, оформить».",

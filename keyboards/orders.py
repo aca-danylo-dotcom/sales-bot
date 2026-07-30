@@ -33,6 +33,7 @@ CB_ADD = "c:add"           # c:add:<variant_id> — положить 1 шт
 # --- Оформление и оплата ---
 CB_CHECKOUT = "o:start"    # начать оформление
 CB_KEEP = "o:keep"         # оставить значение из профиля
+CB_KEEP_ALL = "o:keepall"  # данные доставки с прошлого заказа подходят целиком
 CB_SKIP = "o:skip"         # пропустить необязательный шаг (комментарий)
 CB_CONFIRM = "o:ok"        # подтвердить сводку и создать заказ
 CB_RESTART = "o:again"     # заполнить данные заново
@@ -139,6 +140,21 @@ def step_kb(keep: str | None = None, *, skip: bool = False) -> InlineKeyboardMar
         kb.button(text=f"✅ Оставить: {shown}", callback_data=CB_KEEP)
     if skip:
         kb.button(text="Пропустить", callback_data=CB_SKIP)
+    kb.button(text="❌ Отменить оформление", callback_data=CB_CANCEL)
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def saved_data_kb() -> InlineKeyboardMarkup:
+    """Данные с прошлого заказа: подходят как есть или что-то поменялось.
+
+    Показывается вместо первого вопроса формы, когда бот уже знает получателя,
+    телефон и отделение: постоянному покупателю незачем вводить одно и то же
+    четыре раза подряд.
+    """
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Всё верно", callback_data=CB_KEEP_ALL)
+    kb.button(text="✏️ Изменить данные", callback_data=CB_RESTART)
     kb.button(text="❌ Отменить оформление", callback_data=CB_CANCEL)
     kb.adjust(1)
     return kb.as_markup()

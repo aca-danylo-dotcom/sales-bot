@@ -86,6 +86,11 @@ _LIMITS = {
 
 _MAX_ORDERS_SHOWN = 5
 
+# Статусы, в которых заказ владельцу в Telegram ещё не показывали: заявка уходит
+# только после того, как клиент нажал «Я оплатил». Пока заказ здесь, событий по
+# нему владельцу не шлём — он их не поймёт, заказ он в глаза не видел.
+_UNSEEN_BY_ADMIN = ("new", "awaiting_payment")
+
 # Телефон: оставляем только цифры и ведущий плюс. Украинский номер — 10 цифр
 # без кода страны, международный — до 15 (стандарт E.164).
 _PHONE_CLEAN_RE = re.compile(r"[^\d+]")
@@ -254,30 +259,17 @@ def payment_text(order: dict) -> str:
     )
 
 
-# Заголовки пушей владельцу. Меняется только шапка — разбор заказа под ней
-# один и тот же: владельцу нужен полный текст в обоих случаях, а какое из
-# сообщений останется в чате, решает notify_admin_order.
-_ADMIN_HEADERS = {
-    "new": ("🆕 <b>Новый заказ №{id}</b>",
-            "Реквизиты клиенту отправлены, ждём оплату."),
-    "paid": ("💳 <b>Клиент оплатил заказ №{id}</b>",
-             "Проверьте поступление и подтвердите."),
-}
+def admin_order_text(order: dict, username: str | None = None) -> str:
+    """Пуш владельцу об оплате: состав, сумма, получатель, контакт клиента.
 
-
-def admin_order_text(order: dict, username: str | None = None,
-                     kind: str = "paid") -> str:
-    """Пуш владельцу о заказе: состав, сумма, получатель, контакт клиента.
-
-    Короткого варианта нет намеренно. Пуш об оплате — то сообщение, по которому
-    владелец принимает решение, и лезть за составом и адресом в переписку выше
-    он не должен.
+    Единственное сообщение по заказу — по нему владелец и принимает решение,
+    поэтому в нём сразу всё: лезть за составом и адресом в переписку выше он не
+    должен.
     """
-    header, hint = _ADMIN_HEADERS[kind]
     contact = f"@{username}" if username else f"id {order['client_id']}"
     lines = [
-        header.format(id=order["id"]),
-        hint,
+        f"💳 <b>Клиент оплатил заказ №{order['id']}</b>",
+        "Проверьте поступление и подтвердите.",
         "",
         order_items_text(order),
         "",
@@ -359,47 +351,27 @@ async def notify_client(bot: Bot, client_id: int, text: str, markup=None) -> boo
         return False
 
 
-async def notify_admin_order(bot: Bot, order: dict, username: str | None,
-                             kind: str = "paid") -> None:
-    """Пуш владельцу о заказе. Ошибку глушим — заказ уже создан.
+async def notify_admin_order(bot: Bot, order: dict, username: str | None) -> None:
+    """Заявка владельцу: клиент говорит, что оплатил. Ошибку глушим — заказ создан.
 
-    По заказу в чате владельца висит ровно одно сообщение: перед отправкой
-    нового прежний пуш удаляется. Клиент нажимает «Я оплатил» через минуту
-    после оформления, и без этого рядом лежали два сообщения об одном заказе —
-    непонятно, какое из них актуальное.
+    Единственный пуш по заказу за всю его жизнь. Про оформление владельцу не
+    сообщаем намеренно: пока клиент не нажал «Я оплатил», решать нечего, а
+    сообщения о заказах, которые ещё никто не оплатил, только копятся в чате.
+    Оформленные заказы видны в веб-CRM, там же подтверждается оплата, если
+    деньги пришли, а кнопку клиент нажать забыл.
 
-    Именно удаление, а не правка текста: правка не поднимает сообщение в чате и
-    не даёт уведомления, а про оплату владелец должен узнать сразу.
-
-    «Оплата пришла» есть только на пуше об оплате: на сообщении о новом заказе
-    эта кнопка читалась как «клиент уже заплатил», хотя реквизиты ему только
-    ушли. Отклонить заказ можно с любого пуша. Повторное решение по тому же
-    заказу отсекается проверкой статуса в handlers/admin.py.
-
-    Если деньги пришли, а клиент про кнопку «Я оплатил» забыл, заказ
-    подтверждается из веб-CRM.
+    Повторное решение по тому же заказу отсекается проверкой статуса в
+    handlers/admin.py.
     """
-    previous = order.get("admin_msg_id")
-    if previous:
-        try:
-            await bot.delete_message(config.ADMIN_ID, previous)
-        except (TelegramForbiddenError, TelegramBadRequest):
-            # Сообщение старше двух суток или уже удалено руками — не беда,
-            # новое всё равно уйдёт.
-            logger.info("Прежний пуш по заказу %s удалить не удалось", order["id"])
-
     try:
-        sent = await bot.send_message(
+        await bot.send_message(
             config.ADMIN_ID,
-            admin_order_text(order, username, kind),
-            reply_markup=admin_order_kb(order["id"], can_confirm=kind != "new"),
+            admin_order_text(order, username),
+            reply_markup=admin_order_kb(order["id"]),
             parse_mode=_HTML,
         )
     except (TelegramForbiddenError, TelegramBadRequest):
         logger.exception("Не удалось отправить заявку по заказу %s владельцу", order["id"])
-        return
-
-    await queries.set_admin_msg_id(order["id"], sent.message_id)
 
 
 # ─────────────────────────── Корзина ───────────────────────────
@@ -906,9 +878,9 @@ async def _place_order(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
     await callback.message.answer(
         payment_text(order), reply_markup=payment_kb(order_id), parse_mode=_HTML
     )
-    # Владелец узнаёт о заказе сразу, а не когда клиент нажмёт «Я оплатил»:
-    # товар уже снят с витрины, и о таком стоит знать в момент оформления.
-    await notify_admin_order(bot, order, callback.from_user.username, kind="new")
+    # Владельцу здесь не пишем: заказ ждёт оплаты, решать по нему нечего.
+    # Заявка уйдёт, когда клиент нажмёт «Я оплатил» (см. claim_paid), а сам
+    # заказ виден в веб-CRM с момента оформления.
     await callback.answer()
 
 
@@ -940,7 +912,7 @@ async def claim_paid(callback: CallbackQuery, bot: Bot) -> None:
         f"Спасибо! Проверяем поступление по заказу №{order_id} и вернёмся с "
         f"подтверждением 🙌",
     )
-    await notify_admin_order(bot, order, callback.from_user.username, kind="paid")
+    await notify_admin_order(bot, order, callback.from_user.username)
     await callback.answer()
 
 
@@ -1055,7 +1027,16 @@ async def order_cancel_do(callback: CallbackQuery, bot: Bot) -> None:
 
 
 async def _notify_admin_cancelled(bot: Bot, order: dict, username: str | None) -> None:
-    """Владельцу — что заказ отменил сам покупатель. Ошибку глушим: заказ уже отменён."""
+    """Владельцу — что заказ отменил сам покупатель. Ошибку глушим: заказ уже отменён.
+
+    `order` — состояние ДО отмены. Про неоплаченные заказы молчим: владелец о
+    них не знал (заявка уходит только после кнопки «Я оплатил»), и сообщение об
+    отмене того, чего он не видел, — лишний шум. Отменённый заказ виден в
+    веб-CRM.
+    """
+    if order["status"] in _UNSEEN_BY_ADMIN:
+        return
+
     contact = f"@{username}" if username else f"id {order['client_id']}"
     text = (
         f"🚫 <b>Покупатель отменил заказ №{order['id']}</b>\n"

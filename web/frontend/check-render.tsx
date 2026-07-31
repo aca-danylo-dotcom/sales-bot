@@ -1,0 +1,106 @@
+/**
+ * Проверка отрисовки: рисуются ли разделы на настоящих данных.
+ *
+ * Панель без JavaScript не работает, поэтому ошибка вроде «нет такого поля у
+ * undefined» видна только в браузере — и обычно менеджеру, а не нам. Этот
+ * прогон ловит такие вещи заранее: страницы отрисовываются в node, а данные
+ * берутся с живого сервера и кладутся в кеш заранее, чтобы компоненты шли по
+ * настоящей разметке, а не по ветке «загружаем».
+ *
+ * Как запускать (сервер на 8080 должен быть поднят):
+ *
+ *   npx vite build --ssr check-render.tsx --outDir ssr-check
+ *   mv ssr-check/check-render.js ssr-check/check-render.mjs
+ *   node ssr-check/check-render.mjs
+ *
+ * Заодно это единственная автоматическая проверка на экранирование: имя
+ * клиента с тегом внутри не должно попасть в разметку как разметка.
+ */
+import { renderToString } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
+import type { ReactNode } from "react";
+
+import { ConfirmProvider } from "./src/components/confirm";
+import { FlashProvider } from "./src/lib/flash";
+import App from "./src/App";
+import Stats from "./src/pages/Stats";
+
+const BASE = "http://localhost:8080";
+
+async function load(url: string) {
+  const response = await fetch(BASE + url);
+  return response.json();
+}
+
+async function main() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  client.setQueryData(["meta"], await load("/api/meta"));
+  client.setQueryData(["summary"], await load("/api/summary"));
+  client.setQueryData(["orders", ""], await load("/api/orders"));
+  client.setQueryData(["order", "1", "order"], await load("/api/orders/1"));
+  client.setQueryData(["order", "2", "client"], await load("/api/orders/2?tab=client"));
+  client.setQueryData(["products", ""], await load("/api/products"));
+  client.setQueryData(["product", "1"], await load("/api/products/1"));
+  client.setQueryData(["stock", ""], await load("/api/products/stock"));
+  client.setQueryData(["categories"], await load("/api/products/categories"));
+  client.setQueryData(["stats", ""], await load("/api/stats"));
+
+  const wrap = (children: ReactNode, path: string) => (
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <FlashProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </FlashProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+
+  const pages: [string, string, ReactNode, string[]][] = [
+    ["Сводка", "/", <App />, ["Требует внимания", "metric-value"]],
+    ["Заказы", "/orders", <App />, ["Ждут оплаты", "table-wrap"]],
+    ["Карточка заказа", "/orders/1", <App />, ["Что отправляем", "timeline"]],
+    ["Карточка: клиент", "/orders/2?tab=client", <App />, ["Переписка с ботом"]],
+    ["Товары", "/products", <App />, ["Остатки по размерам", "thumb-col"]],
+    ["Карточка товара", "/products/1", <App />, ["Сохранить всё", "Удалить товар"]],
+    ["Новый товар", "/products/new", <App />, ["Ещё размер", "Создать товар"]],
+    ["Остатки", "/products/stock", <App />, ["Сохранить остатки"]],
+    [
+      "Статистика",
+      "/stats",
+      <Stats />,
+      [
+        "Продажи",
+        "Путь заказа",
+        "Клиенты и консультации",
+        "Что покупают",
+        "Лежит без движения",
+        "served-value",
+        "Средний чек",
+        "Разговор → заказ",
+      ],
+    ],
+  ];
+
+  let bad = 0;
+  for (const [title, path, element, expects] of pages) {
+    try {
+      const html = renderToString(wrap(element, path));
+      const missing = expects.filter((text) => !html.includes(text));
+      const raw = html.includes("<img src=x onerror=");
+      if (missing.length || raw) {
+        bad += 1;
+        console.log(`  ✗ ${title}: нет ${missing.join(", ")}${raw ? " | ТЕГ НЕ ЭКРАНИРОВАН" : ""}`);
+      } else {
+        console.log(`  ✓ ${title} (${html.length} символов)`);
+      }
+    } catch (error) {
+      bad += 1;
+      console.log(`  ✗ ${title}: ${(error as Error).message}`);
+    }
+  }
+  console.log(bad ? `ПРОВАЛОВ: ${bad}` : "Все страницы отрисованы.");
+}
+
+void main();

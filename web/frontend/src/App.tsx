@@ -6,6 +6,7 @@
  * работать. Отдавать index.html на любой из этих адресов умеет сам сервер —
  * см. catch-all в web/app.py.
  */
+import { Suspense, lazy } from "react";
 import { NavLink, Link, Route, Routes } from "react-router-dom";
 
 import { FlashMessages } from "./lib/flash";
@@ -18,7 +19,12 @@ import ProductNew from "./pages/ProductNew";
 import Products from "./pages/Products";
 import Stock from "./pages/Stock";
 import Summary from "./pages/Summary";
-import { EmptyState } from "./components/ui";
+import { EmptyState, Loading } from "./components/ui";
+
+/* Статистика грузится отдельным куском. Её открывают раз в неделю, а тянет она
+   за собой библиотеку графиков — незачем задерживать из-за неё «Заказы»,
+   которые открывают каждые пять минут. */
+const Stats = lazy(() => import("./pages/Stats"));
 
 function NotFound() {
   return (
@@ -51,13 +57,18 @@ export default function App() {
           <NavLink to="/products" className={({ isActive }) => (isActive ? "active" : "")}>
             Товары
           </NavLink>
+          <NavLink to="/stats" className={({ isActive }) => (isActive ? "active" : "")}>
+            Статистика
+          </NavLink>
         </nav>
       </header>
 
       <main className="page">
         <FlashMessages />
+        <Suspense fallback={<Loading />}>
         <Routes>
           <Route path="/" element={<Summary />} />
+          <Route path="/stats" element={<Stats />} />
           <Route path="/orders" element={<Orders />} />
           <Route path="/orders/:id" element={<OrderCard />} />
           <Route path="/products" element={<Products />} />
@@ -66,6 +77,7 @@ export default function App() {
           <Route path="/products/:id" element={<ProductCard />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
+        </Suspense>
       </main>
 
       {/* Карточки о новых заказах — поверх всего, в правом нижнем углу. */}

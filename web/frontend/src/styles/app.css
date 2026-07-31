@@ -2,7 +2,14 @@
    шрифт, крупные скругления, тонкие светлые линии вместо рамок и теней.
 
    Светлая тема без автопереключения по настройкам ОС: панель смотрят с разных
-   устройств, и одинаковый вид у всех важнее подстройки под систему. */
+   устройств, и одинаковый вид у всех важнее подстройки под систему.
+
+   Файл переехал сюда из web/static/style.css при переводе панели на React —
+   почти без изменений. Дизайн менять было не нужно, а переписывать семь сотен
+   строк на утилиты Tailwind значит на ровном месте рисковать вёрсткой, которая
+   уже работает. Tailwind подключён поверх и применяется только к новому. */
+
+@import "tailwindcss";
 
 :root {
   --bg: #f5f5f7;
@@ -15,6 +22,26 @@
   --danger: #d70015;
   --ok: #1d9d5c;
   --radius: 18px;
+}
+
+/* Те же цвета, но под именами, которые понимает Tailwind: `bg-card`,
+   `text-muted`, `rounded-card`. Значения не дублируются — токены ссылаются на
+   переменные выше, поэтому цвет панели правится ровно в одном месте. */
+@theme {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-ok: var(--ok);
+
+  --radius-card: 18px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+               Roboto, "Helvetica Neue", sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -150,7 +177,9 @@ h2 {
   background: #fff4f4;
   color: var(--danger);
 }
-.problems ul { margin: 8px 0 0; padding-left: 20px; }
+/* list-style задан явно: базовый слой Tailwind снимает маркеры у всех списков,
+   а здесь перечислены причины отказа — без маркеров они сливаются в абзац. */
+.problems ul { margin: 8px 0 0; padding-left: 20px; list-style: disc; }
 
 /* Сообщение о результате действия */
 .flash {
@@ -257,6 +286,13 @@ h2 {
 .btn.danger-btn:hover { background: #fff0f0; }
 
 .btn.small { font-size: 13px; padding: 5px 11px; }
+
+/* Кнопка, пока запрос в пути. Раньше повторную отправку ловил app.js: страница
+   перезагружалась целиком, и живая кнопка успевала принять второй тап. Теперь
+   её гасит сам React по состоянию запроса, но вид «занята» нужен прежний. */
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn:disabled:hover { background: #e8e8ed; }
+.btn.primary:disabled:hover { background: var(--accent); }
 
 /* ─── Формы ─── */
 
@@ -665,9 +701,10 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 .upload { flex-direction: row; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
 .upload label { max-width: 360px; }
 
-/* Список файлов, выбранных до сохранения: его рисует app.js, чтобы повторный
-   выбор в диалоге добавлял фото, а не заменял весь набор. Без скрипта блока
-   просто нет — вёрстка от этого не меняется. */
+/* Файлы, выбранные до сохранения. Повторный выбор в диалоге должен добавлять
+   фото, а не заменять весь набор: продавец снимает товар в несколько заходов.
+   Раньше это чинил app.js через DataTransfer, теперь список просто живёт в
+   состоянии React — а вид остался прежним. */
 .picked {
   list-style: none;
   margin: 10px 0 0;
@@ -711,6 +748,71 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   font-size: 14px;
 }
 
+/* ─── Уведомления о новых заказах ─── */
+
+/* Единственное, чего в старой панели не было. Держим тот же язык, что и
+   карточки разделов: белый фон, крупный радиус, мягкая тень — только тень
+   заметнее, потому что карточка лежит поверх страницы. */
+.toasts {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(360px, calc(100vw - 40px));
+  pointer-events: none;
+}
+
+/* Кликается сама карточка, а не колонка: сквозь пустое место под стопкой
+   страница должна оставаться доступной. */
+.toasts > * { pointer-events: auto; }
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 14px 16px;
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+.toast:hover { box-shadow: 0 10px 34px rgba(0, 0, 0, 0.2); }
+
+.toast-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+}
+
+.toast-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.toast-title { font-weight: 600; font-size: 14px; }
+.toast-text { font-size: 14px; }
+.toast-sub { font-size: 13px; color: var(--muted); }
+.toast-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.toast-close {
+  flex: none;
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.toast-close:hover { color: var(--text); }
+
 /* ─── Узкий экран ─── */
 
 @media (max-width: 900px) {
@@ -725,4 +827,6 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   .head { align-items: flex-start; }
   .items li { flex-wrap: wrap; }
   .chat li { max-width: 90%; }
+  /* На телефоне карточка занимает ширину экрана: угол там условный. */
+  .toasts { left: 12px; right: 12px; bottom: 12px; width: auto; }
 }

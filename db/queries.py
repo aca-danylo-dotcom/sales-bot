@@ -1587,6 +1587,254 @@ async def count_zero_stock() -> int:
         return (await cursor.fetchone())["cnt"]
 
 
+# ─────────────────────────── Статистика ───────────────────────────
+# Всё в этом блоке — только чтение и только за период. Период везде задаётся
+# теми же двумя датами, что и фильтр в разделе «Заказы», и сравнивается через
+# date(created_at): в базе лежит момент с точностью до секунды, а «за месяц»
+# должно включать оба крайних дня целиком.
+
+
+# Заказ считается проданным, когда оплату подтвердили: до этого денег нет, а
+# после — товар уже наш долг перед клиентом. Отменённые не в счёт нигде.
+_PAID = "o.status IN ('confirmed', 'shipped', 'done')"
+
+
+async def revenue_by_day(*, date_from: str, date_to: str) -> list[dict]:
+    """Выручка и число заказов по дням — на столбики графика.
+
+    Дни без заказов база не вернёт: строки просто нет. Дырки заполняет
+    web/api/stats.py, потому что «пустой вторник» — это ноль на графике, а не
+    отсутствующий столбик, иначе неделя выглядит плотнее, чем была.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT date(o.created_at)                      AS day,
+                       COUNT(*)                                AS orders,
+                       COALESCE(SUM(CASE WHEN {_PAID}
+                                         THEN o.total ELSE 0 END), 0) AS revenue
+                FROM orders o
+                WHERE date(o.created_at) >= date(?)
+                  AND date(o.created_at) <= date(?)
+                  AND o.status <> 'cancelled'
+                GROUP BY day
+                ORDER BY day""",
+            (date_from, date_to),
+        )
+        return _rows(await cursor.fetchall())
+
+
+async def order_funnel(*, date_from: str, date_to: str) -> dict:
+    """Сколько заказов дошло до каждого шага: оформлен → оплатил → подтверждён →
+    отправлен → выполнен.
+
+    Считаем по ДОСТИГНУТОМУ состоянию, а не по текущему статусу. Иначе воронка
+    расширялась бы посередине: менеджер подтверждает оплату и без нажатия
+    клиентом «Я оплатил», и такой заказ выпал бы из шага, через который на самом
+    деле прошёл. Здесь каждый следующий шаг — подмножество предыдущего.
+
+    Отменённые в шагах не участвуют вовсе и считаются отдельно: они отваливаются
+    на разных этапах, и рисовать их ступенью значило бы сложить несравнимое.
+    """
+    reached_paid = ("(o.paid_at IS NOT NULL OR o.confirmed_at IS NOT NULL "
+                    "OR o.shipped_at IS NOT NULL OR o.status IN ('shipped', 'done'))")
+    reached_confirmed = ("(o.confirmed_at IS NOT NULL OR o.shipped_at IS NOT NULL "
+                         "OR o.status IN ('shipped', 'done'))")
+    reached_shipped = "(o.shipped_at IS NOT NULL OR o.status = 'done')"
+
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT
+                    COALESCE(SUM(o.status <> 'cancelled'), 0)                AS placed,
+                    COALESCE(SUM(o.status <> 'cancelled' AND {reached_paid}), 0)
+                                                                             AS paid_claimed,
+                    COALESCE(SUM(o.status <> 'cancelled' AND {reached_confirmed}), 0)
+                                                                             AS confirmed,
+                    COALESCE(SUM(o.status <> 'cancelled' AND {reached_shipped}), 0)
+                                                                             AS shipped,
+                    COALESCE(SUM(o.status = 'done'), 0)                      AS done,
+                    COALESCE(SUM(o.status = 'cancelled'), 0)                 AS cancelled,
+                    COALESCE(SUM(CASE WHEN o.status = 'cancelled'
+                                      THEN o.total ELSE 0 END), 0)           AS cancelled_sum
+                FROM orders o
+                WHERE date(o.created_at) >= date(?)
+                  AND date(o.created_at) <= date(?)""",
+            (date_from, date_to),
+        )
+        return dict(await cursor.fetchone())
+
+
+async def delivery_stats(*, date_from: str, date_to: str) -> dict:
+    """Доставки: сколько уехало и сколько в среднем ждали отправки.
+
+    Среднее время считаем в часах и только по заказам, которые действительно
+    отправили за этот период: смешивать их с ещё лежащими на складе — значит
+    получить красивую цифру, за которой стоит половина работы.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT
+                   COUNT(*)                                                  AS shipped,
+                   COALESCE(SUM(o.status = 'done'), 0)                       AS done,
+                   AVG((julianday(o.shipped_at) - julianday(o.created_at)) * 24)
+                                                                             AS avg_hours
+               FROM orders o
+               WHERE o.shipped_at IS NOT NULL
+                 AND date(o.shipped_at) >= date(?)
+                 AND date(o.shipped_at) <= date(?)""",
+            (date_from, date_to),
+        )
+        return dict(await cursor.fetchone())
+
+
+async def top_products(*, date_from: str, date_to: str, limit: int = 8) -> list[dict]:
+    """Что покупали: товары по деньгам за период.
+
+    Группируем по названию из заказа (title_snapshot), а не по product_id:
+    товар могли переименовать или удалить, а в отчёте он должен остаться тем,
+    что человек покупал. Цена тоже из заказа — по той же причине.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT oi.title_snapshot                          AS title,
+                       SUM(oi.qty)                                AS units,
+                       SUM(oi.qty * oi.price_snapshot)            AS revenue,
+                       COUNT(DISTINCT o.id)                       AS orders,
+                       -- Ссылка на карточку — только если товар ещё существует:
+                       -- проданное могли удалить из каталога, а в отчёте оно
+                       -- остаётся. Тогда просто текст без ссылки.
+                       (SELECT v.product_id
+                          FROM order_items oi2
+                          JOIN product_variants v ON v.id = oi2.variant_id
+                         WHERE oi2.title_snapshot = oi.title_snapshot
+                         ORDER BY oi2.id DESC LIMIT 1)            AS product_id
+                FROM order_items oi
+                JOIN orders o ON o.id = oi.order_id
+                WHERE date(o.created_at) >= date(?)
+                  AND date(o.created_at) <= date(?)
+                  AND {_PAID}
+                GROUP BY oi.title_snapshot
+                ORDER BY revenue DESC
+                LIMIT ?""",
+            (date_from, date_to, limit),
+        )
+        return _rows(await cursor.fetchall())
+
+
+async def top_products_total(*, date_from: str, date_to: str) -> dict:
+    """Итог по всем проданным позициям — чтобы посчитать долю «остальных»."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT COUNT(DISTINCT oi.title_snapshot)          AS titles,
+                       COALESCE(SUM(oi.qty), 0)                   AS units,
+                       COALESCE(SUM(oi.qty * oi.price_snapshot), 0) AS revenue
+                FROM order_items oi
+                JOIN orders o ON o.id = oi.order_id
+                WHERE date(o.created_at) >= date(?)
+                  AND date(o.created_at) <= date(?)
+                  AND {_PAID}""",
+            (date_from, date_to),
+        )
+        return dict(await cursor.fetchone())
+
+
+async def idle_products(*, date_from: str, date_to: str, limit: int = 8) -> list[dict]:
+    """Товары на витрине, которых за период не купили ни разу.
+
+    Только те, у кого есть что продавать: товар без остатка не купили не потому,
+    что он плохой, — его просто не было. Такой список отвечает на вопрос «что
+    лежит зря», а не «что кончилось» — про кончившееся есть своя карточка.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT p.id, p.title, p.category, p.price,
+                       COALESCE(SUM(v.stock), 0) AS stock
+                FROM products p
+                JOIN product_variants v ON v.product_id = p.id
+                WHERE p.is_active = 1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM order_items oi
+                      JOIN orders o ON o.id = oi.order_id
+                      WHERE oi.title_snapshot = p.title
+                        AND date(o.created_at) >= date(?)
+                        AND date(o.created_at) <= date(?)
+                        AND {_PAID}
+                  )
+                GROUP BY p.id
+                HAVING stock > 0
+                ORDER BY p.sort_order, p.id DESC
+                LIMIT ?""",
+            (date_from, date_to, limit),
+        )
+        return _rows(await cursor.fetchall())
+
+
+async def clients_stats(*, date_from: str, date_to: str) -> dict:
+    """Люди: скольких бот обслужил всего и что происходило за период.
+
+    `served_total` — накопительный итог с первого дня работы: сколько человек
+    вообще разговаривало с ботом. Он не зависит от выбранного периода, и это
+    сознательно — «обслужено» читается как итог, а не как выработка за неделю.
+
+    Конверсию считаем не «заказы ÷ клиенты», а по людям: сколько из писавших в
+    этот период оформили заказ в этот же период. Иначе один покупатель с тремя
+    заказами дал бы конверсию больше ста процентов.
+    """
+    period = ("date(created_at) >= date(?) AND date(created_at) <= date(?)")
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT
+                (SELECT COUNT(DISTINCT client_id) FROM conversations)          AS served_total,
+                (SELECT COUNT(DISTINCT client_id) FROM conversations
+                  WHERE {period})                                              AS talked,
+                (SELECT COUNT(*) FROM clients WHERE {period})                  AS new_clients,
+                (SELECT COUNT(DISTINCT o.client_id) FROM orders o
+                  WHERE o.status <> 'cancelled'
+                    AND date(o.created_at) >= date(?)
+                    AND date(o.created_at) <= date(?))                         AS buyers,
+                (SELECT COUNT(*) FROM (
+                    SELECT o.client_id FROM orders o
+                    WHERE o.status <> 'cancelled'
+                      AND date(o.created_at) >= date(?)
+                      AND date(o.created_at) <= date(?)
+                    GROUP BY o.client_id HAVING COUNT(*) > 1))                 AS repeat_buyers,
+                (SELECT COUNT(DISTINCT c.client_id) FROM conversations c
+                  WHERE date(c.created_at) >= date(?)
+                    AND date(c.created_at) <= date(?)
+                    AND EXISTS (SELECT 1 FROM orders o
+                                WHERE o.client_id = c.client_id
+                                  AND o.status <> 'cancelled'
+                                  AND date(o.created_at) >= date(?)
+                                  AND date(o.created_at) <= date(?)))          AS talked_and_bought
+            """,
+            # Шесть пар дат: по одной на каждое подсчитанное число, и две
+            # подряд в последнем — там период проверяется и у переписки, и у
+            # заказа.
+            (date_from, date_to) * 6,
+        )
+        return dict(await cursor.fetchone())
+
+
+async def recent_cancelled(*, date_from: str, date_to: str, limit: int = 5) -> list[dict]:
+    """Последние отменённые заказы за период — с причиной, если её вписали.
+
+    Причина живёт во внутренней заметке (`note`): её пишет менеджер при отмене,
+    клиенту она не уходит. Без этого списка «отменено 7» — просто цифра, а надо
+    видеть, повторяется ли одно и то же.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT o.id, o.name, o.total, o.note, o.created_at
+               FROM orders o
+               WHERE o.status = 'cancelled'
+                 AND date(o.created_at) >= date(?)
+                 AND date(o.created_at) <= date(?)
+               ORDER BY o.id DESC
+               LIMIT ?""",
+            (date_from, date_to, limit),
+        )
+        return _rows(await cursor.fetchall())
+
+
 # ─────────────────────── Выгрузка в Google Sheets ───────────────────────
 
 

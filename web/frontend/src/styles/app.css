@@ -11,6 +11,8 @@
 
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
 :root {
   --bg: #f5f5f7;
   --card: #ffffff;
@@ -22,6 +24,45 @@
   --danger: #d70015;
   --ok: #1d9d5c;
   --radius: 18px;
+  /* Цвета графиков. Пришли серыми вместе с компонентами Bklit — заменены на
+     палитру панели: первый цвет наш синий, дальше спокойные оттенки того же
+     семейства. Чтобы столбики и доли читались рядом с карточками, а не спорили
+     с ними. Восемь цветов, потому что в топе товаров восемь долей. */
+  --legend: var(--card);
+  --legend-foreground: var(--text);
+  --legend-muted: #f5f5f7;
+  --legend-muted-foreground: var(--muted);
+  --legend-track: var(--line);
+  --chart-1: #0071e3;
+  --chart-2: #34a2e8;
+  --chart-3: #5e5ce6;
+  --chart-4: #1d9d5c;
+  --chart-5: #f5a623;
+  --chart-6: #d95dbd;
+  --chart-7: #00a9a5;
+  --chart-8: #ff6b4a;
+  --chart-background: var(--card);
+  --chart-foreground: var(--text);
+  --chart-foreground-muted: var(--muted);
+  --chart-line-primary: var(--chart-1);
+  --chart-line-secondary: var(--chart-2);
+  --chart-crosshair: var(--accent);
+  --chart-grid: var(--line);
+  --chart-brush-border: var(--chart-grid);
+  /* Подсказка при наведении — тёмная плашка, как в системных всплывашках. */
+  --chart-tooltip-background: rgba(29, 29, 31, 0.88);
+  --chart-tooltip-foreground: #ffffff;
+  --chart-tooltip-muted: rgba(255, 255, 255, 0.65);
+  --chart-marker-background: #f5f5f7;
+  --chart-marker-border: var(--line);
+  --chart-marker-foreground: var(--text);
+  --chart-label: var(--muted);
+  --chart-scale-01: oklch(0.98 0.003 106);
+  --chart-scale-02: oklch(0.92 0.008 106);
+  --chart-scale-03: oklch(0.82 0.015 106);
+  --chart-scale-04: oklch(0.68 0.02 106);
+  --chart-scale-05: oklch(0.55 0.025 106);
+  --chart-scale-pattern-color: oklch(0.96 0.005 106);
 }
 
 /* Те же цвета, но под именами, которые понимает Tailwind: `bg-card`,
@@ -748,6 +789,73 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   font-size: 14px;
 }
 
+/* ─── Статистика ─── */
+
+/* Выбор периода стоит перед цифрами, потому что от него зависят все они.
+   Нажатый отрезок помечен так же, как активная вкладка товаров. */
+.period-presets { display: flex; gap: 6px; }
+.period-presets .btn.on {
+  background: var(--text);
+  color: #fff;
+}
+
+/* Числа блока: те же карточки-метрики, что на «Сводке», но помельче — здесь их
+   на экране втрое больше. Ссылка и не-ссылка выглядят одинаково: разница лишь
+   в том, что по одним можно перейти в список. */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+  margin: 18px 0 22px;
+}
+.stat-row.tight { margin-bottom: 6px; }
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: #f5f5f7;
+  color: var(--text);
+}
+a.stat:hover { background: #ececf0; text-decoration: none; }
+
+.stat-title { font-size: 13px; color: var(--muted); }
+.stat-value { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; }
+.stat-sub { font-size: 13px; color: var(--muted); }
+
+/* Графику нужна ширина карточки целиком: столбики за месяц иначе слипаются. */
+.chart { margin-top: 8px; }
+.funnel { margin: 18px 0 8px; }
+
+/* Круг и легенда рядом, пока хватает ширины. */
+.pie-row {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  flex-wrap: wrap;
+  margin: 10px 0 22px;
+}
+.pie-legend { min-width: 240px; flex: 1; }
+
+/* Счётчик обслуженных: единственное место в панели с крупной цифрой ради самой
+   цифры. Она накопительная и меняется редко — потому и заметная. */
+.served {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 6px 0 2px;
+}
+.served-value {
+  font-size: 54px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--accent);
+}
+.served-label { font-size: 15px; color: var(--muted); }
+
 /* ─── Уведомления о новых заказах ─── */
 
 /* Единственное, чего в старой панели не было. Держим тот же язык, что и
@@ -829,4 +937,42 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   .chat li { max-width: 90%; }
   /* На телефоне карточка занимает ширину экрана: угол там условный. */
   .toasts { left: 12px; right: 12px; bottom: 12px; width: auto; }
+}
+
+/* Тёмная тема, приехавшая вместе с компонентами, удалена: панель светлая у
+   всех, независимо от настроек системы, — это решение владельца, а класса
+   `.dark` в разметке нет вовсе. */
+
+@theme inline {
+  --color-legend: var(--legend);
+  --color-legend-foreground: var(--legend-foreground);
+  --color-legend-muted: var(--legend-muted);
+  --color-legend-muted-foreground: var(--legend-muted-foreground);
+  --color-legend-track: var(--legend-track);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-background: var(--chart-background);
+  --color-chart-foreground: var(--chart-foreground);
+  --color-chart-foreground-muted: var(--chart-foreground-muted);
+  --chart-line-primary: var(--chart-line-primary);
+  --chart-line-secondary: var(--chart-line-secondary);
+  --color-chart-crosshair: var(--chart-crosshair);
+  --color-chart-grid: var(--chart-grid);
+  --chart-brush-border: var(--chart-brush-border);
+  --color-chart-tooltip-background: var(--chart-tooltip-background);
+  --color-chart-tooltip-foreground: var(--chart-tooltip-foreground);
+  --color-chart-tooltip-muted: var(--chart-tooltip-muted);
+  --color-chart-marker-background: var(--chart-marker-background);
+  --color-chart-marker-border: var(--chart-marker-border);
+  --color-chart-marker-foreground: var(--chart-marker-foreground);
+  --color-chart-label: var(--chart-label);
+  --color-chart-scale-01: var(--chart-scale-01);
+  --color-chart-scale-02: var(--chart-scale-02);
+  --color-chart-scale-03: var(--chart-scale-03);
+  --color-chart-scale-04: var(--chart-scale-04);
+  --color-chart-scale-05: var(--chart-scale-05);
+  --color-chart-scale-pattern-color: var(--chart-scale-pattern-color);
 }

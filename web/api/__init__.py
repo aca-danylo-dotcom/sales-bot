@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from web.api import notifications, orders, products, summary
+from web.api import notifications, orders, products, stats, summary
 
 
 def setup_routes(app: web.Application) -> None:
@@ -28,3 +28,4 @@ def setup_routes(app: web.Application) -> None:
     orders.setup_routes(app)
     products.setup_routes(app)
     notifications.setup_routes(app)
+    stats.setup_routes(app)

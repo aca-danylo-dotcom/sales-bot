@@ -371,10 +371,13 @@ async def notify_admin_order(bot: Bot, order: dict, username: str | None,
     Именно удаление, а не правка текста: правка не поднимает сообщение в чате и
     не даёт уведомления, а про оплату владелец должен узнать сразу.
 
-    Кнопки «Оплата пришла» / «Отклонить» вешаем на оба пуша: деньги часто
-    приходят раньше, чем клиент вспоминает про кнопку «Я оплатил», и владелец
-    должен уметь закрыть заказ с первого же сообщения. Повторное решение по
-    тому же заказу отсекается проверкой статуса в handlers/admin.py.
+    «Оплата пришла» есть только на пуше об оплате: на сообщении о новом заказе
+    эта кнопка читалась как «клиент уже заплатил», хотя реквизиты ему только
+    ушли. Отклонить заказ можно с любого пуша. Повторное решение по тому же
+    заказу отсекается проверкой статуса в handlers/admin.py.
+
+    Если деньги пришли, а клиент про кнопку «Я оплатил» забыл, заказ
+    подтверждается из веб-CRM.
     """
     previous = order.get("admin_msg_id")
     if previous:
@@ -389,7 +392,7 @@ async def notify_admin_order(bot: Bot, order: dict, username: str | None,
         sent = await bot.send_message(
             config.ADMIN_ID,
             admin_order_text(order, username, kind),
-            reply_markup=admin_order_kb(order["id"]),
+            reply_markup=admin_order_kb(order["id"], can_confirm=kind != "new"),
             parse_mode=_HTML,
         )
     except (TelegramForbiddenError, TelegramBadRequest):

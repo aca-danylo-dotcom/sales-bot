@@ -228,10 +228,16 @@ def orders_kb(orders: list[dict]) -> InlineKeyboardMarkup | None:
     return kb.as_markup()
 
 
-def admin_order_kb(order_id: int) -> InlineKeyboardMarkup:
-    """Заявка владельцу: подтвердить оплату или отклонить заказ."""
+def admin_order_kb(order_id: int, *, can_confirm: bool = True) -> InlineKeyboardMarkup:
+    """Заявка владельцу: подтвердить оплату или отклонить заказ.
+
+    `can_confirm=False` — заказ только оформлен, платить клиент ещё даже не
+    начинал. Кнопка «Оплата пришла» на таком сообщении выглядела так, будто
+    деньги уже ждут проверки; она появляется, когда клиент нажал «Я оплатил».
+    """
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Оплата пришла", callback_data=f"{CB_ADMIN_OK}:{order_id}")
+    if can_confirm:
+        kb.button(text="✅ Оплата пришла", callback_data=f"{CB_ADMIN_OK}:{order_id}")
     kb.button(text="❌ Отклонить", callback_data=f"{CB_ADMIN_NO}:{order_id}")
     kb.adjust(2)
     return kb.as_markup()

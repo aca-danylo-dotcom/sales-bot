@@ -273,7 +273,7 @@ async def cmd_start(message: Message) -> None:
     """
     await queries.ensure_client(message.from_user.id)
     await message.answer(
-        f"Привет! Это {config.SHOP_NAME}, {config.SHOP_CITY}.\n\n"
+        f"Здравствуйте! Это {config.SHOP_NAME}, {config.SHOP_CITY}.\n\n"
         "Спрашивайте что угодно: подберу размер, покажу фото, скажу что есть в наличии.",
         reply_markup=main_menu(),
     )

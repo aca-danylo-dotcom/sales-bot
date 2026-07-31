@@ -269,16 +269,21 @@ export default function Stats() {
           прежних шагах.
         </p>
         {funnel.steps[0].value ? (
-          <FunnelChart
-            data={funnel.steps.map((step) => ({
-              label: step.label,
-              value: step.value,
-              displayValue: step.display,
-            }))}
-            color="var(--chart-2)"
-            layers={3}
-            className="funnel"
-          />
+          <div className="funnel-panel">
+            <FunnelChart
+              data={funnel.steps.map((step) => ({
+                label: step.label,
+                value: step.value,
+                displayValue: step.display,
+              }))}
+              color="#4a4a4f"
+              layers={3}
+              edges="curved"
+              labelLayout="spread"
+              grid={{ bands: true, lines: true }}
+              className="funnel"
+            />
+          </div>
         ) : (
           <p className="muted">Заказов за период нет — рисовать нечего.</p>
         )}

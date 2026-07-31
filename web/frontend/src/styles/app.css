@@ -84,6 +84,15 @@
   --color-danger: var(--danger);
   --color-ok: var(--ok);
 
+  /* Имена, которыми подписаны классы в компонентах графиков (`text-foreground`,
+     `bg-foreground`, `text-muted-foreground`). Без них Tailwind просто не
+     создаёт эти классы, и, например, пилюля с процентом в воронке остаётся
+     бесцветной. Значения — наши же, поэтому вид панели от них не меняется;
+     смысл в том, что внутри тёмного блока их можно перекрыть на месте. */
+  --color-foreground: var(--text);
+  --color-background: var(--card);
+  --color-muted-foreground: var(--muted);
+
   --radius-card: 18px;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
@@ -832,7 +841,29 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 
 /* Графику нужна ширина карточки целиком: столбики за месяц иначе слипаются. */
 .chart { margin-top: 8px; }
-.funnel { margin: 18px 0 8px; }
+
+/* Воронка живёт на тёмной подложке — так её просил владелец, и так она честнее
+   читается: полупрозрачные слои сегментов на белом почти не видны, а на
+   графитовом фоне разница между ступенями различима с одного взгляда.
+   Панель остаётся светлой: тёмный здесь только этот блок.
+
+   Переменные перекрыты на месте — компоненты внутри рисуют по ним, поэтому
+   белые цифры, серые подписи и тёмный текст на пилюле получаются сами. */
+.funnel-panel {
+  margin: 18px 0 22px;
+  padding: 26px 20px 16px;
+  border-radius: 16px;
+  background: #0b0b0c;
+
+  --color-foreground: #f5f5f7;
+  --color-background: #0b0b0c;
+  --color-muted-foreground: #86868b;
+  --color-muted: #17171a;
+  --chart-grid: #2e2e33;
+  --chart-label: #86868b;
+}
+
+.funnel { width: 100%; }
 
 /* Круг и легенда рядом, пока хватает ширины. */
 .pie-row {

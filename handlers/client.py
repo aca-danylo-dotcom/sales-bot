@@ -4,12 +4,16 @@
 модель. Модель через инструменты работает с каталогом и корзиной, а фотографии
 товаров, о которых зашла речь, отправляет уже этот хендлер — см. ClientContext.
 
+Снимок, присланный покупателем, уходит в ту же модель вместе с сообщением: она
+смотрит, что на картинке, и дальше ищет похожее обычными инструментами.
+
 Порядок роутеров: этот подключается ПОСЛЕДНИМ, потому что ловит свободный текст
 целиком и иначе перехватил бы кнопки админки и оформления заказа.
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import re
 import time
@@ -17,8 +21,8 @@ from collections import Counter, deque
 from datetime import datetime, timezone
 
 from aiogram import Bot, F, Router
-from aiogram.filters import CommandStart
-from aiogram.types import Message
+from aiogram.filters import CommandStart, StateFilter
+from aiogram.types import Message, PhotoSize
 
 import config
 from db import queries
@@ -75,6 +79,22 @@ _total_reported_day: str = ""
 # Лимит щедрый — живой покупатель его не заметит, а намеренный раздув отсекается.
 _MAX_INPUT_CHARS = 1000
 
+# Снимок от клиента. Telegram хранит одно фото в нескольких размерах, и модели
+# за каждый пиксель платим мы: мелкого превью хватает, чтобы понять «чёрные
+# кроссовки с белой подошвой», а полноразмерный кадр стоит в разы дороже и ничего
+# к этому не добавляет. Берём первый размер шириной от _PHOTO_MIN_WIDTH.
+_PHOTO_MIN_WIDTH = 700
+
+# Потолок на скачивание: снимок с телефона в это укладывается с запасом, а всё,
+# что больше, — либо не фотография, либо попытка нагрузить бота.
+_PHOTO_MAX_BYTES = 4 * 1024 * 1024
+
+# Альбом (несколько фото одним сообщением) приходит несколькими апдейтами с общим
+# media_group_id. В модель отправляем только первый — иначе один жест клиента
+# оборачивается пятью платными запросами и пятью ответами подряд.
+_ALBUMS_KEEP = 200
+_seen_albums: dict[str, float] = {}
+
 # Через сколько часов карточку товара можно показать тому же клиенту заново.
 # В пределах одного разговора повтор не нужен — фото и цена видны выше в
 # переписке. Но человек, вернувшийся на следующий день, листать вверх не станет,
@@ -122,6 +142,60 @@ def _should_warn(user_id: int) -> bool:
         _user_warned[user_id] = now
         return True
     return False
+
+
+def _album_first(message: Message) -> bool:
+    """Первое фото альбома — да, остальные — нет (одно сообщение = один ответ)."""
+    group = message.media_group_id
+    if not group:
+        return True
+    if group in _seen_albums:
+        return False
+    if len(_seen_albums) >= _ALBUMS_KEEP:
+        # Чистим половину самых старых: словарь живёт вечно, а ключ в нём
+        # появляется от каждого альбома, присланного за всё время работы бота.
+        for old in sorted(_seen_albums, key=_seen_albums.get)[: _ALBUMS_KEEP // 2]:
+            _seen_albums.pop(old, None)
+    _seen_albums[group] = time.monotonic()
+    return True
+
+
+def _pick_photo(sizes: list[PhotoSize]) -> PhotoSize:
+    """Самый мелкий из пригодных размеров — по нему модель всё видит, а платим меньше."""
+    for size in sizes:  # Telegram отдаёт список от меньшего к большему
+        if size.width >= _PHOTO_MIN_WIDTH:
+            return size
+    return sizes[-1]
+
+
+async def _download_image(bot: Bot, photo: PhotoSize) -> str:
+    """Снимок → data-URI: картинку модель принимает только так, файлом её не отдать."""
+    buffer = await bot.download(photo)
+    data = buffer.read()
+    # Telegram пережимает присланные фото в JPEG, поэтому тип фиксированный.
+    return "data:image/jpeg;base64," + base64.b64encode(data).decode()
+
+
+def _incoming_text(message: Message) -> str:
+    """Что от клиента записываем в переписку.
+
+    Сам снимок в базу не кладём: в CRM переписку читает менеджер, и ему нужна
+    пометка о фото и подпись к нему, а не мегабайты картинок в таблице сообщений.
+    """
+    if message.text:
+        return message.text
+    caption = (message.caption or "").strip()
+    if message.photo:
+        return ("[фото от клиента] " + caption).strip()
+    return caption
+
+
+def _photo_intro(message: Message) -> str:
+    """Реплика, с которой снимок уходит в модель, — подпись клиента внутри кавычек."""
+    caption = (message.caption or "").strip()
+    if caption:
+        return f"Клиент прислал фото. Его подпись к снимку: «{caption}»"
+    return "Клиент прислал фото без подписи."
 
 
 async def _daily_ok(message: Message, bot: Bot, user_id: int) -> bool:
@@ -174,7 +248,7 @@ async def _daily_ok(message: Message, bot: Bot, user_id: int) -> bool:
             # Сообщение, на которое бот не ответил, всё же кладём в переписку:
             # менеджер в CRM должен видеть, чем человек закончил. Дальнейшие его
             # сообщения уже не пишем — иначе спам раздувает таблицу.
-            await queries.add_message(user_id, "user", message.text)
+            await queries.add_message(user_id, "user", _incoming_text(message))
             await queries.trim_history(user_id, _KEEP_HISTORY)
             # Владельцу — один раз за сутки на клиента. Живой покупатель до этой
             # черты не доходит, так что каждый такой случай стоит увидеть: это
@@ -420,7 +494,67 @@ async def on_text(message: Message, bot: Bot) -> None:
         await _run_and_reply(message, bot)
 
 
-async def _run_and_reply(message: Message, bot: Bot) -> None:
+@router.message(StateFilter(None), F.photo)
+async def on_photo(message: Message, bot: Bot) -> None:
+    """Фото от покупателя: модель смотрит, что на снимке, и подбирает похожее.
+
+    Во время оформления заказа (StateFilter(None) не пропускает) фото сюда не
+    попадает: там бот ждёт имя и адрес, и подменять шаг формы разговором нельзя.
+    """
+    user_id = message.from_user.id
+
+    # Альбом отсекаем до лимитов: пять снимков одним жестом — это одно обращение
+    # клиента, и тратить на него пять попыток из минутного лимита нечестно.
+    if not _album_first(message):
+        return
+
+    if len(message.caption or "") > _MAX_INPUT_CHARS:
+        await message.answer(
+            "Многовато текста под фото 🙂 Напишите покороче: что ищете, какой "
+            "размер и цвет — так я быстрее подберу.",
+            reply_markup=main_menu(),
+        )
+        return
+
+    if not _rate_ok(user_id):
+        if _should_warn(user_id):
+            await message.answer(
+                "Слишком много сообщений подряд — я не успеваю. Напишите, "
+                "пожалуйста, через минуту.",
+                reply_markup=main_menu(),
+            )
+        return
+
+    photo = _pick_photo(message.photo)
+    if (photo.file_size or 0) > _PHOTO_MAX_BYTES:
+        await message.answer(
+            "Фото слишком тяжёлое, у меня не открывается. Пришлите, пожалуйста, "
+            "обычным снимком (не файлом) — или опишите словами, что ищете.",
+            reply_markup=main_menu(),
+        )
+        return
+
+    if not await _daily_ok(message, bot, user_id):
+        return
+
+    try:
+        image = await _download_image(bot, photo)
+    except Exception as error:
+        logger.exception("Не удалось скачать фото клиента %s", user_id)
+        await message.answer(
+            "Не получилось рассмотреть фото 🙈 Пришлите, пожалуйста, ещё раз — "
+            "или расскажите словами, что ищете.",
+            reply_markup=main_menu(),
+        )
+        agent_stats.report_error("photo_download", str(error))
+        _report_escalated(message, user_id)
+        return
+
+    async with _get_lock(user_id):
+        await _run_and_reply(message, bot, image=image)
+
+
+async def _run_and_reply(message: Message, bot: Bot, image: str | None = None) -> None:
     """Прогоняет агентный цикл, отвечает текстом и досылает карточки товаров."""
     user_id = message.from_user.id
     ctx = ClientContext(client_id=user_id)
@@ -428,7 +562,7 @@ async def _run_and_reply(message: Message, bot: Bot) -> None:
     # Клиент мог написать боту, минуя /start, — заводим его здесь же, иначе
     # внешний ключ не даст сохранить ни реплику, ни корзину.
     await queries.ensure_client(user_id)
-    await queries.add_message(user_id, "user", message.text)
+    await queries.add_message(user_id, "user", _incoming_text(message))
 
     # Профиль и корзину подставляем в промпт на каждом сообщении: консультант не
     # переспрашивает уже известное и знает, что у клиента лежит в корзине.
@@ -445,11 +579,25 @@ async def _run_and_reply(message: Message, bot: Bot) -> None:
     notes = await queries.get_client_notes(user_id)
     conv = _history_to_conversation(await queries.get_history(user_id, _MAX_HISTORY))
 
+    if image and conv:
+        # В базе последней лежит пометка «[фото от клиента]» — для менеджера. В
+        # модель вместо неё уходит сам снимок: картинка живёт только в этом
+        # запросе, в историю она не сохраняется и в следующих сообщениях модель
+        # её уже не видит (второй раз платить за тот же кадр незачем).
+        conv[-1] = {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": _photo_intro(message)},
+                {"type": "input_image", "image_url": image},
+            ],
+        }
+
     await bot.send_chat_action(message.chat.id, "typing")
     try:
         text = await run_agent(
             instructions=build_instructions(
-                client, cart["count"], showcase, purchases, notes),
+                client, cart["count"], showcase, purchases, notes,
+                has_photo=bool(image)),
             conversation=conv,
             tools=TOOLS,
             tool_executor=build_executor(ctx),

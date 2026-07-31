@@ -807,6 +807,21 @@ async def step_text(message: Message, state: FSMContext) -> None:
     await _accept(message, state, field, text[:high])
 
 
+@router.message(StateFilter(Checkout), F.photo)
+async def step_photo(message: Message) -> None:
+    """Фото посреди оформления: разговор с ИИ тут не к месту, но и молчать нельзя.
+
+    Клиентский роутер разбирает снимки только вне формы, поэтому здесь мы
+    объясняем, что сейчас ждём ответ на вопрос, — иначе человек шлёт фото и не
+    получает ничего.
+    """
+    await message.answer(
+        "Сейчас оформляем заказ, поэтому фото я посмотрю чуть позже — ответьте, "
+        "пожалуйста, на вопрос выше. Не хотите продолжать сейчас — нажмите "
+        "«Отменить оформление»."
+    )
+
+
 @router.callback_query(Checkout.confirm, F.data == CB_CONFIRM)
 async def checkout_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     """«Всё верно, оформить» в конце формы."""

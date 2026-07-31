@@ -205,8 +205,11 @@ export default function Stats() {
         </button>
       </form>
 
+      {/* Мозаика: блоки разной ширины в общей сетке. Рядом стоит то, на что
+          смотрят вместе — деньги и люди, воронка и отмены, топ и залежавшееся. */}
+      <div className="stats-grid">
       {/* ─── Продажи ─── */}
-      <section className="card">
+      <section className="card span-8">
         <h2>Продажи</h2>
         {/* Четыре числа, и все разные. «Оформлено» — сколько людей дошло до
             конца, «продано» — сколько денег подтвердили. Расхождение между ними
@@ -260,8 +263,39 @@ export default function Stats() {
         )}
       </section>
 
+      {/* ─── Клиенты ─── */}
+      <section className="card span-4">
+        <h2>Клиенты</h2>
+        <div className="served">
+          {/* Число накопительное и от периода не зависит: «обслужено» — это
+              итог работы бота, а не выработка за неделю. */}
+          <NumberTicker value={clients.served_total} className="served-value" />
+          <span className="served-label">
+            человек поговорили с ботом за всё время
+          </span>
+        </div>
+
+        <div className="stat-row tight">
+          <div className="stat">
+            <span className="stat-title">Писали за период</span>
+            <span className="stat-value">{clients.talked}</span>
+            <span className="stat-sub">новых: {clients.new_clients}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-title">Купили</span>
+            <span className="stat-value">{clients.buyers}</span>
+            <span className="stat-sub">повторно: {clients.repeat_buyers}</span>
+          </div>
+          <div className="stat">
+            <span className="stat-title">Разговор → заказ</span>
+            <span className="stat-value">{clients.conversion}%</span>
+            <span className="stat-sub">бесед с покупкой</span>
+          </div>
+        </div>
+      </section>
+
       {/* ─── Путь заказа ─── */}
-      <section className="card">
+      <section className="card span-8">
         <h2>Путь заказа</h2>
         <p className="muted small">
           Где заказы останавливаются. Ступени считаются по пройденному пути, а не
@@ -308,8 +342,14 @@ export default function Stats() {
           </Link>
         </div>
 
-        {/* Причина отмены — внутренняя заметка менеджера. Она здесь затем,
-            чтобы «отменено 7» превратилось в «семь раз не дозвонились». */}
+      </section>
+
+      {/* ─── Отмены ─── */}
+      {/* Причина отмены — внутренняя заметка менеджера. Отдельным блоком рядом с
+          воронкой: «отменено 7» само по себе ничего не объясняет, а «семь раз не
+          дозвонились» — уже повод что-то поменять. */}
+      <section className="card span-4">
+        <h2>Почему отменяли</h2>
         {data.cancelled_orders.length ? (
           <ul className="notes">
             {data.cancelled_orders.map((order) => (
@@ -323,49 +363,20 @@ export default function Stats() {
               </li>
             ))}
           </ul>
-        ) : null}
-      </section>
-
-      {/* ─── Клиенты ─── */}
-      <section className="card">
-        <h2>Клиенты и консультации</h2>
-        <div className="served">
-          {/* Число накопительное и от периода не зависит: «обслужено» — это
-              итог работы бота, а не выработка за неделю. */}
-          <NumberTicker value={clients.served_total} className="served-value" />
-          <span className="served-label">
-            человек поговорили с ботом за всё время
-          </span>
-        </div>
-
-        <div className="stat-row tight">
-          <div className="stat">
-            <span className="stat-title">Писали за период</span>
-            <span className="stat-value">{clients.talked}</span>
-            <span className="stat-sub">новых: {clients.new_clients}</span>
-          </div>
-          <div className="stat">
-            <span className="stat-title">Купили</span>
-            <span className="stat-value">{clients.buyers}</span>
-            <span className="stat-sub">из них повторно: {clients.repeat_buyers}</span>
-          </div>
-          <div className="stat">
-            <span className="stat-title">Разговор → заказ</span>
-            <span className="stat-value">{clients.conversion}%</span>
-            <span className="stat-sub">сколько бесед закончились покупкой</span>
-          </div>
-        </div>
+        ) : (
+          <p className="muted">За период не отменили ни одного заказа.</p>
+        )}
       </section>
 
       {/* ─── Товары ─── */}
-      <section className="card">
+      <section className="card span-7">
         <h2>Что покупают</h2>
         {products.top.length ? (
           <div className="pie-row">
             <PieChart
               data={slices}
-              size={260}
-              innerRadius={78}
+              size={210}
+              innerRadius={64}
               padAngle={0.02}
               cornerRadius={6}
               hoveredIndex={hovered}
@@ -434,7 +445,7 @@ export default function Stats() {
         ) : null}
       </section>
 
-      <section className="card">
+      <section className="card span-5">
         <h2>Лежит без движения</h2>
         <p className="muted small">
           Товары на витрине, которые за период не купили ни разу. Те, у которых
@@ -466,6 +477,7 @@ export default function Stats() {
           </p>
         ) : null}
       </section>
+      </div>
     </>
   );
 }

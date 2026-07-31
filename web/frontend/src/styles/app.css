@@ -813,31 +813,61 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   color: #fff;
 }
 
+/* Раскладка раздела: карточки разной ширины в общей сетке, а не колонкой во всю
+   страницу. Причина простая — на «Статистике» девять смысловых кусков, и если
+   каждый занимает всю ширину, до товаров приходится крутить три экрана. Здесь
+   же соседние вещи видно рядом: продажи и клиенты, воронка и отмены.
+
+   Двенадцать колонок, ширина блока задаётся классом. Порядок при этом обычный
+   (без grid-auto-flow: dense) — числа должны идти так, как их читают, а не так,
+   как удобнее упаковать. */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+/* Внутри сетки карточка компактнее обычной: воздуха между блоками теперь
+   добавляет сам зазор сетки, а вертикальный отступ здесь только мешал бы. */
+.stats-grid .card {
+  margin-bottom: 0;
+  padding: 20px 22px;
+  height: 100%;
+}
+.stats-grid .card h2 { font-size: 17px; }
+
+.span-4 { grid-column: span 4; }
+.span-5 { grid-column: span 5; }
+.span-7 { grid-column: span 7; }
+.span-8 { grid-column: span 8; }
+.span-12 { grid-column: span 12; }
+
 /* Числа блока: те же карточки-метрики, что на «Сводке», но помельче — здесь их
    на экране втрое больше. Ссылка и не-ссылка выглядят одинаково: разница лишь
    в том, что по одним можно перейти в список. */
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px;
-  margin: 18px 0 22px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 14px 0 16px;
 }
-.stat-row.tight { margin-bottom: 6px; }
+.stat-row.tight { margin-bottom: 4px; }
 
 .stat {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 16px 18px;
-  border-radius: 14px;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 12px;
   background: #f5f5f7;
   color: var(--text);
 }
 a.stat:hover { background: #ececf0; text-decoration: none; }
 
-.stat-title { font-size: 13px; color: var(--muted); }
-.stat-value { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; }
-.stat-sub { font-size: 13px; color: var(--muted); }
+.stat-title { font-size: 12px; color: var(--muted); }
+.stat-value { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.stat-sub { font-size: 12px; color: var(--muted); }
 
 /* Графику нужна ширина карточки целиком: столбики за месяц иначе слипаются. */
 .chart { margin-top: 8px; }
@@ -869,28 +899,32 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 .pie-row {
   display: flex;
   align-items: center;
-  gap: 32px;
+  gap: 22px;
   flex-wrap: wrap;
-  margin: 10px 0 22px;
+  margin: 8px 0 16px;
 }
-.pie-legend { min-width: 240px; flex: 1; }
+.pie-legend { min-width: 190px; flex: 1; }
+
+/* Список отмен в узкой карточке: строка в строку, без «дата справа от текста» —
+   на четырёх колонках это превращается в кашу. */
+.span-4 .notes li { flex-direction: column; align-items: flex-start; gap: 2px; }
 
 /* Счётчик обслуженных: единственное место в панели с крупной цифрой ради самой
    цифры. Она накопительная и меняется редко — потому и заметная. */
 .served {
   display: flex;
-  align-items: baseline;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding: 6px 0 2px;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 0 2px;
 }
 .served-value {
-  font-size: 54px;
+  font-size: 46px;
   font-weight: 600;
+  line-height: 1.05;
   letter-spacing: -0.03em;
   color: var(--text);
 }
-.served-label { font-size: 15px; color: var(--muted); }
+.served-label { font-size: 13px; color: var(--muted); }
 
 /* ─── Уведомления о новых заказах ─── */
 
@@ -961,6 +995,13 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 
 @media (max-width: 900px) {
   .order-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Мозаика держится, пока рядом помещаются два блока. Дальше — колонка: узкая
+   карточка с графиком врёт больше, чем длинная страница. */
+@media (max-width: 1000px) {
+  .stats-grid { grid-template-columns: minmax(0, 1fr); }
+  .span-4, .span-5, .span-7, .span-8, .span-12 { grid-column: span 1; }
 }
 
 @media (max-width: 640px) {

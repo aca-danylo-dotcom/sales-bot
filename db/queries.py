@@ -1256,6 +1256,39 @@ async def count_orders_by_status(
         return {row["status"]: row["cnt"] for row in await cursor.fetchall()}
 
 
+async def max_order_id() -> int:
+    """Номер самого свежего заказа из бота — отсечка «с этого момента».
+
+    Нужна панели при первом заходе: без неё уведомления высыпали бы всю историю
+    разом. Заказы со статусом 'new' не в счёт — их заводит менеджер прямо в CRM,
+    объявлять человеку его же действие незачем.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT COALESCE(MAX(id), 0) AS last_id FROM orders WHERE status <> 'new'"
+        )
+        return (await cursor.fetchone())["last_id"]
+
+
+async def orders_since(since_id: int, limit: int = 10) -> list[dict]:
+    """Заказы новее указанного номера — для всплывающих уведомлений.
+
+    По номеру, а не по времени: id растёт монотонно и не зависит от того, как
+    идут часы на сервере и в браузере.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT id, client_id, name, city, total, status, created_at,
+                      COALESCE((SELECT SUM(qty) FROM order_items oi
+                                WHERE oi.order_id = orders.id), 0) AS units_count
+               FROM orders
+               WHERE id > ? AND status <> 'new'
+               ORDER BY id DESC LIMIT ?""",
+            (since_id, limit),
+        )
+        return _rows(await cursor.fetchall())
+
+
 async def set_order_status(order_id: int, status: str) -> None:
     """Меняет статус и заодно проставляет соответствующую временную метку.
 

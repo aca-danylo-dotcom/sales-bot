@@ -1,8 +1,10 @@
-"""Веб-CRM: приложение aiohttp и каркас страниц.
+"""Веб-CRM: приложение aiohttp — JSON-API и отдача собранной панели.
 
 Поднимается в том же процессе, что и бот (см. bot.py): одна база, один диск с
 фотографиями, один планировщик — разносить это по двум процессам значило бы
-делить между ними SQLite, а он такого не любит.
+делить между ними SQLite, а он такого не любит. Панель на React ничего в этом не
+меняет: она собирается заранее (Vite кладёт файлы в web/dist) и отдаётся тем же
+сервером, второго процесса на Node в проде нет.
 
 ВХОДА НЕТ СОЗНАТЕЛЬНО: ни пароля, ни сессии, ни cookie. Кто открыл адрес — тот
 внутри. Значит, адрес панели и есть весь доступ: на хостинге её видит любой, кто
@@ -17,48 +19,39 @@
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 from pathlib import Path
 from urllib.parse import urlsplit
 
-import aiohttp_jinja2
-import jinja2
 from aiohttp import web
 
 import config
-from services import format
-from web import forms, orders, products, summary
+from web import api
 
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = BASE_DIR / "templates"
-STATIC_DIR = BASE_DIR / "static"
+# Сюда Vite складывает собранную панель (web/frontend → npm run build). В
+# репозитории папки нет: её делает сборка Docker-образа.
+DIST_DIR = BASE_DIR / "dist"
+INDEX_FILE = DIST_DIR / "index.html"
 
 # Фотографии товаров приходят прямо из формы, причём пачкой: продавец выбирает
 # все снимки разом. Стандартный лимит aiohttp (1 МБ) отбрасывал бы обычное фото
 # с телефона целиком, поэтому поднимаем его до размера, в который влезает
-# несколько снимков; отдельный файл всё равно ограничен в web/products.py.
+# несколько снимков; отдельный файл всё равно ограничен в web/api/products.py.
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
-
-def _assets_version() -> str:
-    """Короткая метка содержимого стилей и скрипта — для адреса вида style.css?v=…
-
-    Без неё браузер держит старый файл в памяти сколь угодно долго: правку стилей
-    видно только после жёсткой перезагрузки, а продавец о ней не знает и решает,
-    что панель сломана. Метка считается от содержимого, а не от даты файла: при
-    обновлении сервера адрес меняется только если файл действительно другой.
-    """
-    digest = hashlib.sha1()
-    for name in sorted(p.name for p in STATIC_DIR.glob("*") if p.is_file()):
-        digest.update(name.encode())
-        digest.update((STATIC_DIR / name).read_bytes())
-    return digest.hexdigest()[:8]
+# Что сказать, если панель не собрана. Случай нередкий: локальный запуск бота без
+# `npm run build`. Молчаливый 404 в этом месте выглядит как поломка сервера.
+_NO_BUILD = (
+    "Панель не собрана: нет web/dist/index.html.\n"
+    "Соберите её командой «npm run build» в папке web/frontend "
+    "или откройте dev-сервер Vite на порту 5173."
+)
 
 
-async def health(request: web.Request) -> web.Response:
+async def health(request: web.Request) -> web.Response:  # noqa: ARG001
     """Проверка живости для хостинга — без обращения к базе.
 
     Заодно отвечает на вопрос, ради которого иначе пришлось бы лезть в логи
@@ -84,7 +77,8 @@ async def same_origin_only(request: web.Request, handler):
     Origin. Он должен совпадать с адресом самой панели.
 
     Запросы без Origin пропускаем: так приходят curl и наши же проверочные
-    скрипты, а межсайтовая форма из браузера этот заголовок несёт всегда.
+    скрипты, а межсайтовый запрос из браузера этот заголовок несёт всегда —
+    в том числе fetch, которым теперь ходит панель.
     """
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         origin = request.headers.get("Origin")
@@ -94,32 +88,42 @@ async def same_origin_only(request: web.Request, handler):
     return await handler(request)
 
 
+async def index(request: web.Request) -> web.FileResponse:  # noqa: ARG001
+    """Одна и та же страница на все адреса панели.
+
+    Маршруты (`/orders/5`, `/products/new`) разбирает уже браузер, поэтому
+    сервер обязан отдать index.html и на прямой заход, и на перезагрузку
+    страницы — иначе закладка на карточку заказа открывала бы 404.
+
+    Не кешируем: имя файла у index.html постоянное, а внутри — ссылки на
+    ресурсы с новыми хешами. Закешированный index после обновления тянул бы
+    файлы, которых уже нет.
+    """
+    if not INDEX_FILE.is_file():
+        raise web.HTTPNotFound(text=_NO_BUILD)
+    return web.FileResponse(INDEX_FILE, headers={"Cache-Control": "no-cache"})
+
+
 def create_app(bot=None) -> web.Application:
     app = web.Application(
         client_max_size=MAX_UPLOAD_BYTES, middlewares=[same_origin_only]
     )
     app["bot"] = bot
-    env = aiohttp_jinja2.setup(
-        app,
-        loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
-        # Автоэкранирование включено везде: в шаблоны попадают имена клиентов и
-        # их сообщения боту, то есть текст, который писал посторонний человек.
-        autoescape=True,
-        # Цены и подписи вариантов форматирует тот же код, что и сообщения бота:
-        # «1 200 грн» в панели и в чате должны читаться одинаково.
-        filters={
-            "money": format.money,
-            "variant": format.variant_label,
-            "plural": format.plural,
-            "plain": forms.plain_number,
-        },
-    )
-    env.globals["asset_v"] = _assets_version()
+
     app.router.add_get("/health", health)
-    summary.setup_routes(app)
-    products.setup_routes(app)
-    orders.setup_routes(app)
-    app.router.add_static("/static/", STATIC_DIR, name="static")
+    # Данные и действия — здесь же и /media/<id> с фотографиями.
+    api.setup_routes(app)
+
+    # Файлы сборки. Имена у них с хешем содержимого (об этом заботится Vite),
+    # поэтому кешировать можно надолго: изменившийся файл приедет по другому
+    # адресу. Папки может не быть — при локальном запуске без сборки.
+    assets = DIST_DIR / "assets"
+    if assets.is_dir():
+        app.router.add_static("/assets/", assets, name="assets")
+
+    # Ловушка на всё остальное. Регистрируется последней: маршрут `{tail:.*}`
+    # совпадает с чем угодно и, стоя выше, перехватил бы и /api, и /media.
+    app.router.add_get("/{tail:.*}", index)
     return app
 
 

@@ -1,4 +1,4 @@
-"""Раздел «Товары» веб-CRM: список, карточка, склад, фото.
+"""Раздел «Товары»: список, карточка, склад, фото — в виде JSON-API.
 
 Зачем он рядом с админкой в Telegram, а не вместо неё: телефон удобен, чтобы
 сфотографировать товар и завести его на месте, браузер — чтобы поправить три
@@ -6,25 +6,28 @@
 в боте, здесь правится, а изменённый здесь остаток бот отдаёт клиенту сразу же:
 кеша каталога нет, каждый запрос идёт в SQLite.
 
-Страницы работают без JavaScript: обычные формы и схема «POST → редирект → GET»
-(редирект нужен, чтобы обновление страницы не повторяло сохранение). Результат
-действия переезжает в адрес кодом (`?ok=saved`), а не текстом — так в адресную
-строку нельзя подсунуть произвольное сообщение якобы от панели.
+Карточка и создание товара приходят `multipart/form-data`, а не JSON: вместе с
+полями едут файлы. Имена полей остались прежние (`title`, `price`, `stock_12`,
+`new_size_0`, `photo`), поэтому разбор формы, склейка вариантов и отсев дублей
+фото по хешу перенесены сюда буквально — это код, отлаженный работой, и
+переписывать его ради красивого JSON незачем.
+
+Замечания по форме возвращаются списком (`problems`) с кодом 400: раньше сервер
+перерисовывал страницу с тем, что человек набрал, — теперь набранное и так живёт
+в браузере, а серверу остаётся сказать, что именно не так.
 """
 from __future__ import annotations
 
 import hashlib
 import logging
-from urllib.parse import parse_qsl, urlencode
 from uuid import uuid4
 
-import aiohttp_jinja2
 from aiohttp import web
 
-import config
 from db import queries
-from services import media
+from services import format, media
 from web import forms
+from web.api.helpers import body, fail, not_found, ok
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +37,6 @@ from keyboards.admin import CATEGORIES  # noqa: E402  (после логгера
 
 PAGE_SIZE = 20
 
-# Что показать после действия. Текст держим здесь, в адресе — только ключ.
 MESSAGES = {
     "saved": "Изменения сохранены.",
     # Скрытый товар после сохранения выглядит точно так же, как выставленный, —
@@ -85,11 +87,6 @@ NEW_VARIANT_ROWS = 3
 # пустой цикл. Тридцать размеров за один заход — с запасом.
 MAX_VARIANT_ROWS = 30
 
-# Что переносим со страницы списка обратно в неё же после сохранения: только
-# известные фильтры, чтобы через скрытое поле формы нельзя было подставить в
-# адрес что угодно.
-BACK_KEYS = ("q", "category", "status", "stock", "page")
-
 # Картинки принимаем по содержимому, а не по имени файла: расширение легко
 # переименовать, а первые байты подделать сложнее. Заодно так узнаём, с каким
 # расширением класть файл на диск, чтобы веб отдавал его с верным типом.
@@ -113,12 +110,6 @@ def _image_suffix(data: bytes) -> str | None:
     return None
 
 
-def _redirect(location: str, **params: str) -> web.HTTPFound:
-    """Редирект после действия, с кодом результата в адресе."""
-    query = urlencode({k: v for k, v in params.items() if v})
-    raise web.HTTPFound(f"{location}?{query}" if query else location)
-
-
 def _filters(request: web.Request) -> dict:
     """Поисковый запрос и фильтры списка — в том виде, в каком их ждёт БД."""
     query = request.query
@@ -130,35 +121,53 @@ def _filters(request: web.Request) -> dict:
     }
 
 
-def _filters_qs(request: web.Request) -> str:
-    """Те же фильтры строкой для ссылок — чтобы пагинация их не теряла."""
-    keep = {k: v for k, v in request.query.items()
-            if k in ("q", "category", "status", "stock") and v}
-    return urlencode(keep)
+def _stock_pairs(data, *, prefix: str) -> tuple[list[tuple[int, int]], bool]:
+    """Собирает (variant_id, stock) из полей формы. Второе значение — были ли ошибки.
+
+    Ошибка хотя бы в одном поле отменяет всё сохранение: наполовину сохранённый
+    склад хуже, чем несохранённый, — по нему продолжат торговать, не заметив.
+    """
+    pairs: list[tuple[int, int]] = []
+    for key, value in data.items():
+        if not key.startswith(prefix):
+            continue
+        variant_id = forms.integer(key[len(prefix):])
+        stock = forms.integer(value)
+        if variant_id is None or stock is None:
+            return [], True
+        pairs.append((variant_id, stock))
+    return pairs, False
 
 
-def _back_params(value: object) -> dict[str, str]:
-    """Фильтры списка, приехавшие скрытым полем формы, — только известные ключи."""
-    if not isinstance(value, str) or not value:
-        return {}
-    return {k: v for k, v in parse_qsl(value) if k in BACK_KEYS and v}
+async def _categories() -> list[str]:
+    """Подсказки для поля категории: наши постоянные плюс всё, что уже завели."""
+    return sorted(set(CATEGORIES) | set(await queries.get_all_categories()))
 
 
-def _page_context(request: web.Request) -> dict:
-    """Общее для всех страниц раздела: сообщение о результате и активный пункт меню."""
-    return {
-        "shop_name": config.SHOP_NAME,
-        "currency": config.SHOP_CURRENCY,
-        "message": MESSAGES.get(request.query.get("ok", "")),
-        "error": ERRORS.get(request.query.get("err", "")),
-    }
+def _files(data, key: str = "photo") -> list:
+    """Выбранные файлы из формы. Пустое поле браузер тоже присылает — отсеиваем."""
+    getall = getattr(data, "getall", None)
+    if getall is None:  # JSON-тело: файлов там не бывает
+        return []
+    return [f for f in getall(key, []) if getattr(f, "filename", "")]
+
+
+def _done(key: str, **extra) -> web.Response:
+    return ok(message=MESSAGES[key], **extra)
 
 
 # ─────────────────────────── Список ───────────────────────────
 
 
-@aiohttp_jinja2.template("products.html")
-async def products_list(request: web.Request) -> dict:
+def _row(product: dict) -> dict:
+    return {
+        **product,
+        "price_text": format.money(product["price"]),
+        "old_price_text": format.money(product["old_price"]) if product["old_price"] else "",
+    }
+
+
+async def products_list(request: web.Request) -> web.Response:
     filters = _filters(request)
     page = forms.page(request.query.get("page"))
 
@@ -169,43 +178,45 @@ async def products_list(request: web.Request) -> dict:
         **filters, limit=PAGE_SIZE, offset=page * PAGE_SIZE
     )
 
-    return {
-        **_page_context(request),
-        "section": "products",
-        "products": products,
+    return ok({
+        "products": [_row(product) for product in products],
+        # Для фильтра — только те категории, что реально есть в каталоге:
+        # предлагать отбор, который заведомо ничего не найдёт, незачем.
         "categories": await queries.get_all_categories(),
         "total": total,
         "page": page + 1,
         "pages": pages,
-        "filters_qs": _filters_qs(request),
-        "q": request.query.get("q", ""),
-        "category": request.query.get("category", ""),
-        "status": request.query.get("status", ""),
-        "stock": request.query.get("stock", ""),
-    }
+    })
+
+
+async def categories(request: web.Request) -> web.Response:  # noqa: ARG001
+    """Подсказки категорий для карточки и создания товара."""
+    return ok({"categories": await _categories()})
 
 
 # ─────────────────────────── Карточка ───────────────────────────
 
 
-async def _card_context(request: web.Request, product: dict, **extra) -> dict:
-    return {
-        **_page_context(request),
-        "section": "products",
-        "product": product,
-        "categories": sorted(set(CATEGORIES) | set(await queries.get_all_categories())),
-        "back_qs": _filters_qs(request),
-        **extra,
-    }
-
-
-@aiohttp_jinja2.template("product.html")
-async def product_card(request: web.Request) -> dict:
-    product_id = int(request.match_info["id"])
-    product = await queries.get_product_full(product_id)
+async def _product_or_404(request: web.Request) -> dict:
+    product = await queries.get_product_full(int(request.match_info["id"]))
     if not product:
-        raise web.HTTPNotFound(text="Товар не найден")
-    return await _card_context(request, product)
+        raise not_found(ERRORS["not_found"])
+    return product
+
+
+async def product_card(request: web.Request) -> web.Response:
+    product = await _product_or_404(request)
+    return ok({
+        "product": {
+            **product,
+            # Цена в поле ввода должна выглядеть так, как её набирали: «1200»,
+            # а не «1200.0» и не «1 200 грн» — иначе обратно приедет мусор.
+            "price_input": forms.plain_number(product["price"]),
+            "old_price_input": forms.plain_number(product["old_price"]),
+            "price_text": format.money(product["price"]),
+        },
+        "categories": await _categories(),
+    })
 
 
 async def product_save(request: web.Request) -> web.Response:
@@ -213,22 +224,16 @@ async def product_save(request: web.Request) -> web.Response:
 
     Раньше блоков было три, у каждого своя кнопка, и заполнивший всё подряд
     продавец сохранял только тот блок, чью кнопку нажал, — остальное молча
-    терялось. Поэтому поля собраны в одну форму: «Сохранить всё» записывает
-    их разом, «Готово» делает то же и возвращает в список товаров.
-
-    Ошибку показываем прямо в форме — редирект на этом шаге стёр бы набранное.
+    терялось. Поэтому поля собраны в одну форму: сохраняются разом.
     """
-    product_id = int(request.match_info["id"])
-    product = await queries.get_product_full(product_id)
-    if not product:
-        raise web.HTTPNotFound(text="Товар не найден")
+    product = await _product_or_404(request)
+    product_id = product["id"]
 
     data = await request.post()
     title = forms.text(data, "title", max_len=forms.MAX_TITLE)
     price = forms.price(data.get("price"))
     old_price, old_price_ok = forms.optional_price(data.get("old_price"))
     pairs, bad_stock = _stock_pairs(data, prefix="stock_")
-    back = _back_params(data.get("back"))
 
     problems = []
     if not title:
@@ -241,29 +246,9 @@ async def product_save(request: web.Request) -> web.Response:
         problems.append("Остаток — целое число от 0.")
 
     if problems:
-        # Не редиректим: человек только что набрал текст, и терять его нельзя.
-        # Показываем форму с тем, что он ввёл, и списком замечаний.
-        product.update({
-            "title": title or product["title"],
-            "description": forms.text(data, "description", max_len=forms.MAX_DESCRIPTION),
-            "category": forms.text(data, "category"),
-            "sku": forms.text(data, "sku"),
-        })
-        context = await _card_context(
-            request, product,
-            problems=problems,
-            raw_price=data.get("price", ""),
-            raw_old_price=data.get("old_price", ""),
-            raw_stock={k[len("stock_"):]: v for k, v in data.items()
-                       if k.startswith("stock_") and isinstance(v, str)},
-            raw_new={
-                "size": forms.text(data, "new_size"),
-                "color": forms.text(data, "new_color"),
-                "stock": data.get("new_stock", "") if isinstance(data.get("new_stock"), str) else "",
-            },
-            back_qs=urlencode(back),
-        )
-        return aiohttp_jinja2.render_template("product.html", request, context)
+        # Ничего не пишем: набранное осталось в браузере, а сохранять карточку
+        # с непонятной ценой — хуже, чем попросить проверить поле.
+        return fail("Проверьте поля карточки.", problems=problems)
 
     await queries.update_product(
         product_id,
@@ -279,31 +264,30 @@ async def product_save(request: web.Request) -> web.Response:
 
     # Осечка в новом варианте или в фото не отменяет уже записанное выше:
     # переспрашивать «сохранить ли остальное» после нажатой кнопки — хуже.
-    err = ""
+    warning = ""
     size = forms.text(data, "new_size")
     color = forms.text(data, "new_color")
     if size or color or forms.text(data, "new_stock", max_len=10):
         existing = {(v["size"], v["color"]) for v in await queries.get_variants(product_id)}
         if (size, color) in existing:
-            err = "part_variant"
+            warning = ERRORS["part_variant"]
         else:
             await queries.add_variant(
                 product_id, size=size, color=color,
                 stock=forms.integer(data.get("new_stock")) or 0,
             )
 
-    photos = [f for f in data.getall("photo", []) if getattr(f, "filename", "")]
+    photos = _files(data)
     if photos:
         # Дубли — не ошибка: так выглядит второе нажатие «Сохранить всё» с тем
         # же выбранным фото. Ругаемся, только если не приняли вообще ничего.
         saved, dupes = await _store_photos(product_id, photos)
         if not saved and not dupes:
-            err = err or "part_photo"
+            warning = warning or ERRORS["part_photo"]
 
     # Витрина — той же кнопкой, что и сохранение: «Выставить на продажу» и
-    # «Скрыть с витрины» отправляют эту же форму, поэтому поля уже записаны выше,
-    # и правки не теряются. Отдельная форма /toggle рядом с полями как раз этим и
-    # была плоха: нажал — опубликовал, а набранное ушло.
+    # «Скрыть с витрины» отправляют ту же форму, поэтому поля уже записаны выше,
+    # и правки не теряются.
     publish = bool(forms.text(data, "publish", max_len=4))
     hide = bool(forms.text(data, "hide", max_len=4))
     if publish and not product["is_active"]:
@@ -311,28 +295,19 @@ async def product_save(request: web.Request) -> web.Response:
     elif hide and product["is_active"]:
         await queries.set_product_active(product_id, False)
 
-    # С «Готово» уходим в список — но только если всё прошло гладко: замечание,
-    # показанное на странице, которую человек уже покинул, он не прочитает.
-    if err:
-        _redirect(f"/products/{product_id}", err=err)
-    if forms.text(data, "finish", max_len=4):
-        raise web.HTTPFound(f"/products?{urlencode({**back, 'ok': 'saved'})}")
-
     if publish:
         # Товар на витрине без вариантов клиент увидит, но не купит — молчать об
         # этом нельзя, иначе продавец узнаёт о промахе от покупателя.
-        ok = "published" if await queries.get_variants(product_id) else "published_empty"
+        key = "published" if await queries.get_variants(product_id) else "published_empty"
     elif hide:
-        ok = "unpublished"
+        key = "unpublished"
     else:
-        ok = "saved" if product["is_active"] else "saved_hidden"
-    _redirect(f"/products/{product_id}", ok=ok)
+        key = "saved" if product["is_active"] else "saved_hidden"
+    return _done(key, warning=warning)
 
 
-def _draft_rows(data=None) -> list[dict[str, str]]:
+def _draft_rows(data) -> list[dict[str, str]]:
     """Строки «размер / цвет / остаток» страницы создания — как их набрали.
-
-    Без data — пустой бланк для первого показа формы.
 
     Число строк не фиксировано: кнопка «Ещё размер» дописывает их на странице,
     поэтому читаем столько, сколько пришло, а не заранее известные три. Считаем
@@ -340,9 +315,6 @@ def _draft_rows(data=None) -> list[dict[str, str]]:
     подряд, но полагаться на это незачем — берём наибольший номер и ограничиваем
     его MAX_VARIANT_ROWS.
     """
-    if data is None:
-        return [{"size": "", "color": "", "stock": ""} for _ in range(NEW_VARIANT_ROWS)]
-
     numbers = set()
     for key in data.keys():
         for prefix in ("new_size_", "new_color_", "new_stock_"):
@@ -386,39 +358,18 @@ def _new_variants(rows: list[dict[str, str]]) -> tuple[list[dict], list[str]]:
     return variants, problems
 
 
-async def _new_context(request: web.Request, **extra) -> dict:
-    return {
-        **_page_context(request),
-        "section": "products",
-        "categories": sorted(set(CATEGORIES) | set(await queries.get_all_categories())),
-        "draft": {},
-        "rows": _draft_rows(),
-        "max_variant_rows": MAX_VARIANT_ROWS,
-        "problems": [],
-        "had_photos": False,
-        **extra,
-    }
-
-
-@aiohttp_jinja2.template("product_new.html")
-async def product_new_form(request: web.Request) -> dict:
-    return await _new_context(request)
-
-
 async def product_create(request: web.Request) -> web.Response:
     """Заводит товар целиком: основное, размеры с остатками и фото за один раз.
 
     Раньше страница спрашивала только название с ценой, а варианты и снимки
     приходилось дозаполнять уже в карточке — то есть заведение товара всегда
-    было в два захода. Поля те же, что в карточке, поэтому и обработка похожа:
-    ошибку показываем прямо в форме, не редиректом, чтобы набранное не пропало.
+    было в два захода.
     """
     data = await request.post()
     title = forms.text(data, "title", max_len=forms.MAX_TITLE)
     price = forms.price(data.get("price"))
     old_price, old_price_ok = forms.optional_price(data.get("old_price"))
-    rows = _draft_rows(data)
-    variants, problems = _new_variants(rows)
+    variants, problems = _new_variants(_draft_rows(data))
 
     if not title:
         problems.insert(0, "Без названия товар не создать.")
@@ -427,27 +378,10 @@ async def product_create(request: web.Request) -> web.Response:
     if not old_price_ok:
         problems.append("Старую цену либо оставьте пустой, либо введите числом.")
 
-    photos = [f for f in data.getall("photo", []) if getattr(f, "filename", "")]
+    photos = _files(data)
 
     if problems:
-        context = await _new_context(
-            request,
-            draft={
-                "title": title,
-                "price": data.get("price", ""),
-                "old_price": data.get("old_price", ""),
-                "category": forms.text(data, "category"),
-                "sku": forms.text(data, "sku"),
-                "sort_order": forms.text(data, "sort_order", max_len=10),
-                "description": forms.text(data, "description", max_len=forms.MAX_DESCRIPTION),
-            },
-            rows=rows,
-            problems=problems,
-            # Выбранные файлы браузер при перерисовке не возвращает — честнее
-            # сказать об этом сразу, чем оставить продавца гадать, загрузились ли.
-            had_photos=bool(photos),
-        )
-        return aiohttp_jinja2.render_template("product_new.html", request, context)
+        return fail("Товар не создан.", problems=problems)
 
     # Новый товар заводится скрытым — ровно как в мастере бота. Даже с фото и
     # размерами его стоит посмотреть глазами, прежде чем показывать клиентам.
@@ -468,20 +402,21 @@ async def product_create(request: web.Request) -> web.Response:
 
     # Товар уже создан, поэтому непринятое фото — не повод отменять всё
     # остальное: говорим об этом в карточке, там же его и выбирают заново.
+    warning = ""
     if photos and not any(await _store_photos(product_id, photos)):
-        _redirect(f"/products/{product_id}", err="part_photo_new")
-    _redirect(f"/products/{product_id}", ok="created_ready" if variants else "created")
+        warning = ERRORS["part_photo_new"]
+    return _done("created_ready" if variants else "created", id=product_id, warning=warning)
 
 
 async def product_toggle(request: web.Request) -> web.Response:
     product_id = int(request.match_info["id"])
     product = await queries.get_product(product_id)
     if not product:
-        raise web.HTTPNotFound(text="Товар не найден")
+        raise not_found(ERRORS["not_found"])
 
     new_state = not product["is_active"]
     await queries.set_product_active(product_id, new_state)
-    _redirect(f"/products/{product_id}", ok="shown" if new_state else "hidden")
+    return _done("shown" if new_state else "hidden", is_active=new_state)
 
 
 async def product_delete(request: web.Request) -> web.Response:
@@ -490,29 +425,29 @@ async def product_delete(request: web.Request) -> web.Response:
     for photo in await queries.get_photos(product_id):
         media.remove_photo_file(photo["file_path"])
     await queries.delete_product(product_id)
-    _redirect("/products", ok="deleted")
+    return _done("deleted")
 
 
 # ─────────────────────── Варианты и остатки ───────────────────────
 
 
 async def variants_save(request: web.Request) -> web.Response:
-    """Одна форма на всю таблицу вариантов: остатки, добавление, удаление."""
+    """Таблица вариантов одной пачкой: остатки, добавление, удаление."""
     product_id = int(request.match_info["id"])
-    data = await request.post()
+    data = await body(request)
 
-    # Удаление приходит кнопкой внутри той же формы. Обрабатываем первым: если
-    # человек нажал «Удалить», правки в остальных строках он не подтверждал.
+    # Удаление обрабатываем первым: если человек нажал «Удалить», правки в
+    # остальных строках он не подтверждал.
     delete_id = forms.integer(data.get("delete_variant"))
     if delete_id:
         await queries.delete_variant(delete_id)
-        _redirect(f"/products/{product_id}", ok="variant_deleted")
+        return _done("variant_deleted")
 
     # Остатки сохраняем в любом случае, даже если нажата кнопка «Добавить»:
     # правки в таблице сделаны, и терять их из-за соседнего действия нечестно.
     pairs, bad = _stock_pairs(data, prefix="stock_")
     if bad:
-        _redirect(f"/products/{product_id}", err="stock_bad")
+        return fail(ERRORS["stock_bad"])
     changed = await queries.set_variants_stock(pairs)
 
     size = forms.text(data, "new_size")
@@ -520,70 +455,37 @@ async def variants_save(request: web.Request) -> web.Response:
     if size or color or data.get("new_stock"):
         existing = {(v["size"], v["color"]) for v in await queries.get_variants(product_id)}
         if (size, color) in existing:
-            _redirect(f"/products/{product_id}", err="variant_exists")
+            return fail(ERRORS["variant_exists"])
         await queries.add_variant(
             product_id, size=size, color=color, stock=forms.integer(data.get("new_stock")) or 0
         )
-        _redirect(f"/products/{product_id}", ok="variant_added")
+        return _done("variant_added")
 
-    _redirect(f"/products/{product_id}", ok="stock" if changed else "stock_none")
-
-
-def _stock_pairs(data, *, prefix: str) -> tuple[list[tuple[int, int]], bool]:
-    """Собирает (variant_id, stock) из полей формы. Второе значение — были ли ошибки.
-
-    Ошибка хотя бы в одном поле отменяет всё сохранение: наполовину сохранённый
-    склад хуже, чем несохранённый, — по нему продолжат торговать, не заметив.
-    """
-    pairs: list[tuple[int, int]] = []
-    for key, value in data.items():
-        if not key.startswith(prefix):
-            continue
-        variant_id = forms.integer(key[len(prefix):])
-        stock = forms.integer(value)
-        if variant_id is None or stock is None:
-            return [], True
-        pairs.append((variant_id, stock))
-    return pairs, False
+    return _done("stock" if changed else "stock_none")
 
 
-@aiohttp_jinja2.template("stock.html")
-async def stock_page(request: web.Request) -> dict:
+async def stock_page(request: web.Request) -> web.Response:
     """Все варианты подходящих товаров одной таблицей — правка остатков разом.
 
     Живёт внутри раздела «Товары» второй вкладкой: это те же товары, только
     вид другой — не карточки, а остатки по размерам.
     """
-    filters = _filters(request)
-    rows = await queries.list_stock_rows(**filters)
-    return {
-        **_page_context(request),
-        "section": "products",
-        "rows": rows,
+    rows = await queries.list_stock_rows(**_filters(request))
+    return ok({
+        "rows": [
+            {**row, "variant": format.variant_label(row), "price_text": format.money(row["price"])}
+            for row in rows
+        ],
         "categories": await queries.get_all_categories(),
-        "filters_qs": _filters_qs(request),
-        "q": request.query.get("q", ""),
-        "category": request.query.get("category", ""),
-        "status": request.query.get("status", ""),
-        "stock": request.query.get("stock", ""),
-    }
+    })
 
 
 async def stock_save(request: web.Request) -> web.Response:
-    data = await request.post()
-    pairs, bad = _stock_pairs(data, prefix="stock_")
-    qs = _filters_qs(request)
-    tail = f"&{qs}" if qs else ""
+    pairs, bad = _stock_pairs(await body(request), prefix="stock_")
     if bad:
-        raise web.HTTPFound(f"/products/stock?err=stock_bad{tail}")
+        return fail(ERRORS["stock_bad"])
     changed = await queries.set_variants_stock(pairs)
-    raise web.HTTPFound(f"/products/stock?ok={'stock' if changed else 'stock_none'}{tail}")
-
-
-async def stock_moved(request: web.Request) -> web.Response:
-    """Старый адрес /stock: раздел переехал в «Товары», а закладки остались."""
-    tail = f"?{request.query_string}" if request.query_string else ""
-    raise web.HTTPFound("/products/stock" + tail)
+    return _done("stock" if changed else "stock_none")
 
 
 # ─────────────────────────── Фото ───────────────────────────
@@ -635,36 +537,34 @@ async def _store_photos(product_id: int, fields) -> tuple[int, int]:
 
 
 async def photo_upload(request: web.Request) -> web.Response:
-    """Загрузка фото отдельным запросом — карточка шлёт их вместе с остальным."""
+    """Загрузка фото отдельным запросом — карточка шлёт их и вместе с остальным."""
     product_id = int(request.match_info["id"])
     if not await queries.get_product(product_id):
-        raise web.HTTPNotFound(text="Товар не найден")
+        raise not_found(ERRORS["not_found"])
 
-    data = await request.post()
-    fields = [f for f in data.getall("photo", []) if getattr(f, "filename", "")]
+    fields = _files(await request.post())
     if not fields:
-        _redirect(f"/products/{product_id}", err="photo_empty")
+        return fail(ERRORS["photo_empty"])
 
     saved, dupes = await _store_photos(product_id, fields)
     if saved:
-        _redirect(f"/products/{product_id}", ok="photo_added")
-    _redirect(f"/products/{product_id}",
-              **({"ok": "photo_dupe"} if dupes else {"err": "photo_type"}))
+        return _done("photo_added")
+    if dupes:
+        return _done("photo_dupe")
+    return fail(ERRORS["photo_type"])
 
 
 async def photo_main(request: web.Request) -> web.Response:
-    photo_id = int(request.match_info["id"])
-    product_id = await queries.set_photo_main(photo_id)
+    product_id = await queries.set_photo_main(int(request.match_info["id"]))
     if not product_id:
-        raise web.HTTPNotFound(text="Фото не найдено")
-    _redirect(f"/products/{product_id}", ok="photo_main")
+        raise not_found("Фото не найдено")
+    return _done("photo_main")
 
 
 async def photo_delete(request: web.Request) -> web.Response:
-    photo_id = int(request.match_info["id"])
-    photo = await queries.delete_photo(photo_id)
+    photo = await queries.delete_photo(int(request.match_info["id"]))
     if not photo:
-        raise web.HTTPNotFound(text="Фото не найдено")
+        raise not_found("Фото не найдено")
 
     media.remove_photo_file(photo["file_path"])
     # Удалили главное — главным становится первое из оставшихся, иначе товар
@@ -672,17 +572,17 @@ async def photo_delete(request: web.Request) -> web.Response:
     remaining = await queries.get_photos(photo["product_id"])
     if photo["is_main"] and remaining:
         await queries.set_photo_main(remaining[0]["id"])
-    _redirect(f"/products/{photo['product_id']}", ok="photo_deleted")
+    return _done("photo_deleted")
 
 
 async def photo_file(request: web.Request) -> web.FileResponse:
     """Отдаёт файл фотографии по /media/<photo_id>.
 
-    Прямая ссылка нужна не только панели: по этому же адресу картинку заберёт
-    Instagram Direct, которому telegram file_id ни о чём не говорит.
+    Адрес остался прежним и живёт вне /api: по этой же ссылке картинку заберёт
+    Instagram Direct, которому telegram file_id ни о чём не говорит, — и старые
+    ссылки из переписки не должны протухнуть от переезда панели на React.
     """
-    photo_id = int(request.match_info["id"])
-    photo = await queries.get_photo(photo_id)
+    photo = await queries.get_photo(int(request.match_info["id"]))
     if not photo or not photo["file_path"]:
         raise web.HTTPNotFound(text="Файл не найден")
 
@@ -701,20 +601,19 @@ async def photo_file(request: web.Request) -> web.FileResponse:
 
 
 def setup_routes(app: web.Application) -> None:
-    app.router.add_get("/products", products_list)
-    app.router.add_get("/products/new", product_new_form)
-    app.router.add_post("/products/new", product_create)
-    # Остатки — вторая вкладка «Товаров». Стоит выше маршрутов с {id:\d+},
-    # так что с номерами товаров не спорит.
-    app.router.add_get("/products/stock", stock_page)
-    app.router.add_post("/products/stock", stock_save)
-    app.router.add_get(r"/products/{id:\d+}", product_card)
-    app.router.add_post(r"/products/{id:\d+}", product_save)
-    app.router.add_post(r"/products/{id:\d+}/variants", variants_save)
-    app.router.add_post(r"/products/{id:\d+}/toggle", product_toggle)
-    app.router.add_post(r"/products/{id:\d+}/delete", product_delete)
-    app.router.add_post(r"/products/{id:\d+}/photos", photo_upload)
-    app.router.add_post(r"/photos/{id:\d+}/main", photo_main)
-    app.router.add_post(r"/photos/{id:\d+}/delete", photo_delete)
-    app.router.add_get("/stock", stock_moved)
+    app.router.add_get("/api/products", products_list)
+    # Именованные адреса — выше маршрутов с {id:\d+}: они не цифровые и с
+    # номерами товаров не спорят, но порядок держим явным.
+    app.router.add_get("/api/products/categories", categories)
+    app.router.add_get("/api/products/stock", stock_page)
+    app.router.add_post("/api/products/stock", stock_save)
+    app.router.add_post("/api/products/new", product_create)
+    app.router.add_get(r"/api/products/{id:\d+}", product_card)
+    app.router.add_post(r"/api/products/{id:\d+}", product_save)
+    app.router.add_post(r"/api/products/{id:\d+}/variants", variants_save)
+    app.router.add_post(r"/api/products/{id:\d+}/toggle", product_toggle)
+    app.router.add_post(r"/api/products/{id:\d+}/delete", product_delete)
+    app.router.add_post(r"/api/products/{id:\d+}/photos", photo_upload)
+    app.router.add_post(r"/api/photos/{id:\d+}/main", photo_main)
+    app.router.add_post(r"/api/photos/{id:\d+}/delete", photo_delete)
     app.router.add_get(r"/media/{id:\d+}", photo_file)

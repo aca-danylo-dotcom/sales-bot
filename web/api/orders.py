@@ -1,4 +1,4 @@
-"""Раздел «Заказы» веб-CRM: рабочее место менеджера.
+"""Раздел «Заказы»: рабочее место менеджера, теперь в виде JSON-API.
 
 Здесь заказ проходит весь путь — проверили оплату, собрали, отправили, закрыли —
 и на каждом шаге клиент получает сообщение от бота в свой чат. Поэтому в
@@ -10,7 +10,7 @@
 1. Панель открыта у нескольких человек сразу, и заказ у всех на экране разный по
    свежести. Поэтому каждый переход статуса — условный UPDATE («переведи в
    confirmed, если сейчас awaiting_payment или paid_claimed»), а не «прочитал,
-   решил, записал». Нажатие по устаревшей странице честно отвечает «заказ уже
+   решил, записал». Нажатие по устаревшей карточке честно отвечает «заказ уже
    не там» вместо того, чтобы откатить чужую работу.
 2. Уведомление клиенту не должно ронять действие: заказ уже подтверждён, а
    заблокированный бот — это повод показать предупреждение менеджеру, а не
@@ -22,12 +22,9 @@
 from __future__ import annotations
 
 import logging
-from urllib.parse import urlencode
 
-import aiohttp_jinja2
 from aiohttp import web
 
-import config
 from db import queries
 from handlers.orders import (
     client_cancelled_text,
@@ -35,9 +32,10 @@ from handlers.orders import (
     client_shipped_text,
     notify_client,
 )
-from services import agent_stats
+from services import agent_stats, format
 from services.format import ORDER_STATUS_RU
 from web import forms
+from web.api.helpers import body, fail, not_found, ok
 
 logger = logging.getLogger(__name__)
 
@@ -111,11 +109,9 @@ ERRORS = {
 # отменённый отменён.
 _CANCEL_CLOSED = ("done", "cancelled")
 
-
-def _redirect(location: str, **params: str) -> web.HTTPFound:
-    """Редирект после действия, с кодом результата в адресе (см. web/products.py)."""
-    query = urlencode({k: v for k, v in params.items() if v})
-    raise web.HTTPFound(f"{location}?{query}" if query else location)
+# Конфликт состояния — 409, а не 400: менеджер ничего не напутал, просто заказ
+# успели увести. Клиент по этому коду обновляет карточку молча.
+_CONFLICT = 409
 
 
 def _status(value: object) -> str | None:
@@ -133,24 +129,6 @@ def _filters(request: web.Request) -> dict:
     }
 
 
-def _filters_qs(request: web.Request) -> str:
-    keep = {k: v for k, v in request.query.items()
-            if k in ("status", "q", "from", "to") and v}
-    return urlencode(keep)
-
-
-def _page_context(request: web.Request) -> dict:
-    return {
-        "shop_name": config.SHOP_NAME,
-        "section": "orders",
-        "message": MESSAGES.get(request.query.get("ok", "")),
-        "warning": WARNINGS.get(request.query.get("warn", "")),
-        "error": ERRORS.get(request.query.get("err", "")),
-        "status_names": ORDER_STATUS_RU,
-        "status_short": SHORT_STATUS,
-    }
-
-
 def _manager(request: web.Request) -> str:
     """Кто сидит за этим браузером. Пусто — имя ещё не вводили."""
     return (request.cookies.get(MANAGER_COOKIE) or "").strip()[:forms.MAX_SHORT]
@@ -160,7 +138,7 @@ async def _notify(request: web.Request, client_id: int, text: str) -> bool:
     """Сообщение клиенту от бота. False — не дошло (или бот в панель не передан).
 
     Ошибку сюда не пускаем: действие менеджера уже выполнено, и падение
-    страницы после подтверждённой оплаты выглядело бы как «ничего не вышло».
+    запроса после подтверждённой оплаты выглядело бы как «ничего не вышло».
     """
     bot = request.app.get("bot")
     if bot is None:
@@ -173,23 +151,31 @@ async def _notify(request: web.Request, client_id: int, text: str) -> bool:
         return False
 
 
-def _result(order_id: int, ok: str, delivered: bool = True) -> web.HTTPFound:
-    """Редирект в карточку: что сделали и дошло ли это до клиента."""
-    _redirect(f"/orders/{order_id}", ok=ok, warn="" if delivered else "undelivered")
+def _done(key: str, delivered: bool = True) -> web.Response:
+    """Ответ после действия: что сделали и дошло ли это до клиента."""
+    return ok(message=MESSAGES[key], warning="" if delivered else WARNINGS["undelivered"])
 
 
 async def _order_or_404(request: web.Request) -> dict:
     order = await queries.get_order_full(int(request.match_info["id"]))
     if not order:
-        raise web.HTTPNotFound(text="Заказ не найден")
+        raise not_found(ERRORS["not_found"])
     return order
 
 
 # ─────────────────────────── Список ───────────────────────────
 
 
-@aiohttp_jinja2.template("orders.html")
-async def orders_list(request: web.Request) -> dict:
+def _row(order: dict) -> dict:
+    """Строка таблицы: то же, что было в шаблоне, плюс готовые подписи."""
+    return {
+        **order,
+        "total_text": format.money(order["total"]),
+        "status_short": SHORT_STATUS.get(order["status"], order["status"]),
+    }
+
+
+async def orders_list(request: web.Request) -> web.Response:
     filters = _filters(request)
     page = forms.page(request.query.get("page"))
 
@@ -207,38 +193,42 @@ async def orders_list(request: web.Request) -> dict:
     if counts.get(EXTRA_TAB[0]):
         tabs.insert(1, EXTRA_TAB)
 
-    return {
-        **_page_context(request),
-        "orders": orders,
-        "tabs": [(value, title, sum(counts.values()) if not value else counts.get(value, 0))
-                 for value, title in tabs],
+    return ok({
+        "orders": [_row(order) for order in orders],
+        "tabs": [
+            {
+                "value": value,
+                "title": title,
+                "count": sum(counts.values()) if not value else counts.get(value, 0),
+            }
+            for value, title in tabs
+        ],
         "total": total,
         "page": page + 1,
         "pages": pages,
-        "filters_qs": _filters_qs(request),
-        "tab_qs": urlencode({k: v for k, v in request.query.items()
-                             if k in ("q", "from", "to") and v}),
-        "status": request.query.get("status", ""),
-        "q": request.query.get("q", ""),
-        "date_from": request.query.get("from", ""),
-        "date_to": request.query.get("to", ""),
-    }
+    })
 
 
 # ─────────────────────────── Карточка ───────────────────────────
 
 
-@aiohttp_jinja2.template("order.html")
-async def order_card(request: web.Request) -> dict:
+async def order_card(request: web.Request) -> web.Response:
     order = await _order_or_404(request)
     tab = "client" if request.query.get("tab") == "client" else "order"
 
-    context = {
-        **_page_context(request),
-        "order": order,
-        "tab": tab,
+    for item in order["items"]:
+        item["variant"] = format.variant_label(item)
+        item["price_text"] = format.money(item["price_snapshot"])
+        item["sum_text"] = format.money(item["sum"])
+
+    payload = {
+        "order": {
+            **order,
+            "total_text": format.money(order["total"]),
+            "status_short": SHORT_STATUS.get(order["status"], order["status"]),
+            "status_name": ORDER_STATUS_RU.get(order["status"], order["status"]),
+        },
         "manager": _manager(request),
-        "back_qs": _filters_qs(request),
         "can_confirm": order["status"] in ("new", "awaiting_payment", "paid_claimed"),
         "can_ship": order["status"] in queries.SHIPPABLE_STATUSES,
         "can_finish": order["status"] == "shipped",
@@ -247,10 +237,10 @@ async def order_card(request: web.Request) -> dict:
         # отправленный, посылку ведь могут и не забрать.
         "can_cancel": order["status"] not in _CANCEL_CLOSED,
         "timeline": [
-            ("Оформлен", order["created_at"]),
-            ("Клиент сказал, что оплатил", order["paid_at"]),
-            ("Оплата подтверждена", order["confirmed_at"]),
-            ("Отправлен", order["shipped_at"]),
+            {"title": "Оформлен", "stamp": order["created_at"]},
+            {"title": "Клиент сказал, что оплатил", "stamp": order["paid_at"]},
+            {"title": "Оплата подтверждена", "stamp": order["confirmed_at"]},
+            {"title": "Отправлен", "stamp": order["shipped_at"]},
         ],
     }
 
@@ -258,13 +248,13 @@ async def order_card(request: web.Request) -> dict:
         # Прошлые заказы и переписка нужны, когда клиент звонит с вопросом
         # «а что там с моим заказом»: всё про человека — на одной вкладке.
         other = await queries.get_client_orders(order["client_id"], limit=10)
-        context["client_orders"] = [o for o in other if o["id"] != order["id"]]
-        context["history"] = await queries.get_history(order["client_id"], limit=40)
+        payload["client_orders"] = [_row(o) for o in other if o["id"] != order["id"]]
+        payload["history"] = await queries.get_history(order["client_id"], limit=40)
         # Память бота о клиенте — то, что уходит в промпт на каждом сообщении.
         # Менеджеру она видна затем, чтобы понять, почему бот советует именно
         # это, и вычистить факт, который бот понял не так.
-        context["client_notes"] = await queries.get_client_notes(order["client_id"])
-    return context
+        payload["client_notes"] = await queries.get_client_notes(order["client_id"])
+    return ok(payload)
 
 
 # ─────────────────────────── Действия ───────────────────────────
@@ -277,10 +267,10 @@ async def order_confirm(request: web.Request) -> web.Response:
         order["id"], "confirmed", allowed_from=("new", "awaiting_payment", "paid_claimed")
     )
     if not moved:
-        _redirect(f"/orders/{order['id']}", err="status")
+        return fail(ERRORS["status"], _CONFLICT)
 
     # Цель — только после состоявшегося перехода: повторное нажатие по
-    # устаревшей странице выходит выше и второй «оплаченный заказ» не рисует.
+    # устаревшей карточке выходит выше и второй «оплаченный заказ» не рисует.
     agent_stats.report_goal(
         "order_paid",
         order["client_id"],
@@ -289,7 +279,7 @@ async def order_confirm(request: web.Request) -> web.Response:
         source="crm",
     )
     delivered = await _notify(request, order["client_id"], client_confirmed_text(order))
-    _result(order["id"], "confirmed", delivered)
+    return _done("confirmed", delivered)
 
 
 async def order_ship(request: web.Request) -> web.Response:
@@ -297,52 +287,50 @@ async def order_ship(request: web.Request) -> web.Response:
 
     Отправить можно только взятый заказ. Отправка — то место, где заказ уходит
     из магазина, и по нему потом разбираются с претензиями: без имени в заказе
-    спрашивать не с кого. Проверка серверная, а не только в шаблоне: страница
+    спрашивать не с кого. Проверка серверная, а не только в интерфейсе: карточка
     могла открыться до того, как заказ отпустили.
     """
     order = await _order_or_404(request)
     if not order["assignee"]:
-        _redirect(f"/orders/{order['id']}", err="need_assignee")
+        return fail(ERRORS["need_assignee"], _CONFLICT)
 
-    data = await request.post()
-    ttn = forms.text(data, "ttn", max_len=40)
+    ttn = forms.text(await body(request), "ttn", max_len=40)
     if not ttn:
-        _redirect(f"/orders/{order['id']}", err="ttn_empty")
+        return fail(ERRORS["ttn_empty"])
 
     if not await queries.set_order_ttn(order["id"], ttn):
-        _redirect(f"/orders/{order['id']}", err="status")
+        return fail(ERRORS["status"], _CONFLICT)
 
     delivered = await _notify(request, order["client_id"], client_shipped_text(order, ttn))
-    _result(order["id"], "shipped", delivered)
+    return _done("shipped", delivered)
 
 
 async def order_finish(request: web.Request) -> web.Response:
     """«Выполнен» — посылку забрали. Клиенту не пишем: он и так всё знает."""
     order = await _order_or_404(request)
     if not await queries.advance_order_status(order["id"], "done", allowed_from=("shipped",)):
-        _redirect(f"/orders/{order['id']}", err="status")
-    _redirect(f"/orders/{order['id']}", ok="done")
+        return fail(ERRORS["status"], _CONFLICT)
+    return _done("done")
 
 
 async def order_cancel(request: web.Request) -> web.Response:
     """Отмена с возвратом остатков. Причина остаётся внутри, клиенту не уходит."""
     order = await _order_or_404(request)
-    # Проверка серверная, а не только в шаблоне: страница могла открыться до того,
-    # как заказ отметили выполненным.
+    # Проверка серверная, а не только в интерфейсе: карточка могла открыться до
+    # того, как заказ отметили выполненным.
     if order["status"] in _CANCEL_CLOSED:
-        _redirect(f"/orders/{order['id']}", err="cancel_closed")
+        return fail(ERRORS["cancel_closed"], _CONFLICT)
 
-    data = await request.post()
-    reason = forms.text(data, "reason", max_len=200)
+    reason = forms.text(await body(request), "reason", max_len=200)
     who = _manager(request)
     label = f"Отменён в CRM ({who})" if who else "Отменён в CRM"
     note = f"{label} · {reason}" if reason else label
 
     if not await queries.cancel_order(order["id"], note=note):
-        _redirect(f"/orders/{order['id']}", err="cancel_twice")
+        return fail(ERRORS["cancel_twice"], _CONFLICT)
 
     delivered = await _notify(request, order["client_id"], client_cancelled_text(order))
-    _result(order["id"], "cancelled", delivered)
+    return _done("cancelled", delivered)
 
 
 async def order_take(request: web.Request) -> web.Response:
@@ -352,44 +340,44 @@ async def order_take(request: web.Request) -> web.Response:
     а не молча перебивает чужое имя. Имя заодно запоминается в браузере.
     """
     order = await _order_or_404(request)
-    data = await request.post()
-    name = forms.text(data, "manager") or _manager(request)
+    name = forms.text(await body(request), "manager") or _manager(request)
     if not name:
-        _redirect(f"/orders/{order['id']}", err="manager_empty")
+        return fail(ERRORS["manager_empty"])
 
     taken, current = await queries.take_order(order["id"], name)
-    location = f"/orders/{order['id']}?" + urlencode(
-        {"ok": "taken"} if taken else {"err": "taken"}
-    )
-    response = web.HTTPFound(location)
+    if not taken:
+        logger.info("Заказ %s уже ведёт %s, отказ для %s", order["id"], current, name)
+        return fail(ERRORS["taken"], _CONFLICT)
+
+    response = _done("taken")
+    # Cookie ставим и при отказе, и при успехе? Нет: имя запоминаем только когда
+    # оно на заказе и осело — иначе браузер запомнит промах.
     response.set_cookie(
         MANAGER_COOKIE, name, max_age=MANAGER_COOKIE_MAX_AGE,
         httponly=True, samesite="Lax", path="/",
     )
-    if not taken:
-        logger.info("Заказ %s уже ведёт %s, отказ для %s", order["id"], current, name)
-    raise response
+    return response
 
 
 async def order_release(request: web.Request) -> web.Response:
     """Снять с себя заказ — например, уходя со смены."""
     order = await _order_or_404(request)
     await queries.release_order(order["id"])
-    _redirect(f"/orders/{order['id']}", ok="released")
+    return _done("released")
 
 
 async def order_note(request: web.Request) -> web.Response:
     """Внутренняя заметка: видна только в панели, клиенту не показывается."""
     order = await _order_or_404(request)
-    data = await request.post()
+    data = await body(request)
     await queries.set_order_fields(order["id"], note=forms.text(data, "note", max_len=500))
-    _redirect(f"/orders/{order['id']}", ok="note")
+    return _done("note")
 
 
 async def order_contacts(request: web.Request) -> web.Response:
     """Правка получателя и адреса — телефон с опечаткой правят чаще, чем кажется."""
     order = await _order_or_404(request)
-    data = await request.post()
+    data = await body(request)
     await queries.set_order_fields(
         order["id"],
         name=forms.text(data, "name", max_len=100),
@@ -398,28 +386,28 @@ async def order_contacts(request: web.Request) -> web.Response:
         np_branch=forms.text(data, "np_branch", max_len=120),
         comment=forms.text(data, "comment", max_len=300),
     )
-    _redirect(f"/orders/{order['id']}", ok="saved")
+    return _done("saved")
 
 
 async def client_note_delete(request: web.Request) -> web.Response:
     """Убрать факт из памяти бота: он понял клиента не так — пусть забудет."""
-    order = await _order_or_404(request)
-    data = await request.post()
+    await _order_or_404(request)
+    data = await body(request)
     note_id = forms.integer(data.get("note_id"), minimum=1)
     if note_id:
         await queries.delete_client_note(note_id)
-    _redirect(f"/orders/{order['id']}", tab="client", ok="note_deleted")
+    return _done("note_deleted")
 
 
 def setup_routes(app: web.Application) -> None:
-    app.router.add_get("/orders", orders_list)
-    app.router.add_get(r"/orders/{id:\d+}", order_card)
-    app.router.add_post(r"/orders/{id:\d+}/confirm", order_confirm)
-    app.router.add_post(r"/orders/{id:\d+}/ship", order_ship)
-    app.router.add_post(r"/orders/{id:\d+}/done", order_finish)
-    app.router.add_post(r"/orders/{id:\d+}/cancel", order_cancel)
-    app.router.add_post(r"/orders/{id:\d+}/take", order_take)
-    app.router.add_post(r"/orders/{id:\d+}/release", order_release)
-    app.router.add_post(r"/orders/{id:\d+}/note", order_note)
-    app.router.add_post(r"/orders/{id:\d+}/contacts", order_contacts)
-    app.router.add_post(r"/orders/{id:\d+}/client-note-delete", client_note_delete)
+    app.router.add_get("/api/orders", orders_list)
+    app.router.add_get(r"/api/orders/{id:\d+}", order_card)
+    app.router.add_post(r"/api/orders/{id:\d+}/confirm", order_confirm)
+    app.router.add_post(r"/api/orders/{id:\d+}/ship", order_ship)
+    app.router.add_post(r"/api/orders/{id:\d+}/done", order_finish)
+    app.router.add_post(r"/api/orders/{id:\d+}/cancel", order_cancel)
+    app.router.add_post(r"/api/orders/{id:\d+}/take", order_take)
+    app.router.add_post(r"/api/orders/{id:\d+}/release", order_release)
+    app.router.add_post(r"/api/orders/{id:\d+}/note", order_note)
+    app.router.add_post(r"/api/orders/{id:\d+}/contacts", order_contacts)
+    app.router.add_post(r"/api/orders/{id:\d+}/client-note-delete", client_note_delete)

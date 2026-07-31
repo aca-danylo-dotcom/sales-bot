@@ -1668,6 +1668,104 @@ async def trim_history(client_id: int, keep: int = 200) -> None:
         await conn.commit()
 
 
+# ─────────────────────── Память о клиенте ───────────────────────
+
+# Сколько фактов держим на одного покупателя. Ограничение не про место в базе, а
+# про промпт: он собирается заново на КАЖДОЕ сообщение, и каждая строка памяти —
+# платные токены в каждом запросе. Десятка хватает, чтобы помнить человека;
+# при переполнении вытесняется самый старый факт.
+MAX_CLIENT_NOTES = 10
+
+# Заказы, которые считаются состоявшейся покупкой: оплату подтвердил менеджер.
+# «Ждёт оплаты» и «клиент сказал, что оплатил» — ещё не покупка, отменённые тем
+# более. Иначе бот вспоминал бы «вы у нас брали кроссовки» человеку, который
+# заказ не оплатил.
+PURCHASED_STATUSES = ("confirmed", "shipped", "done")
+
+# Для ключа заметки: всё, кроме букв и цифр, — знаки препинания и пробелы.
+_NOTE_KEY_RE = re.compile(r"[^\w]+", re.UNICODE)
+
+
+def note_key(fact: str) -> str:
+    """Факт в сравнимом виде: «Носит 42 размер.» и «носит 42 размер» — одно и то же."""
+    return _NOTE_KEY_RE.sub(" ", (fact or "").lower()).strip()
+
+
+async def add_client_note(client_id: int, fact: str) -> str:
+    """Записывает факт о клиенте. Возвращает 'saved', 'duplicate' или 'empty'.
+
+    Повтор отсекает UNIQUE(client_id, fact_key), а не проверка перед вставкой:
+    модель охотно записывает одно и то же по второму разу, а два сообщения
+    подряд обрабатываются параллельно — проверка «нет ли такого» между чтением
+    и записью успела бы устареть.
+    """
+    fact = " ".join((fact or "").split())
+    key = note_key(fact)
+    if not key:
+        return "empty"
+
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "INSERT OR IGNORE INTO client_notes (client_id, fact, fact_key, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (client_id, fact, key, config.now_str()),
+        )
+        saved = cursor.rowcount > 0
+        if saved:
+            # Держим только последние MAX_CLIENT_NOTES: свежее знание о человеке
+            # важнее прошлогоднего, а промпт не резиновый.
+            await conn.execute(
+                """DELETE FROM client_notes
+                   WHERE client_id = ? AND id NOT IN (
+                       SELECT id FROM client_notes WHERE client_id = ?
+                       ORDER BY id DESC LIMIT ?
+                   )""",
+                (client_id, client_id, MAX_CLIENT_NOTES),
+            )
+        await conn.commit()
+    return "saved" if saved else "duplicate"
+
+
+async def get_client_notes(client_id: int, limit: int = MAX_CLIENT_NOTES) -> list[dict]:
+    """Заметки о клиенте: берём свежие, отдаём в порядке появления."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT id, fact, created_at FROM client_notes "
+            "WHERE client_id = ? ORDER BY id DESC LIMIT ?",
+            (client_id, limit),
+        )
+        return list(reversed(_rows(await cursor.fetchall())))
+
+
+async def delete_client_note(note_id: int) -> bool:
+    """Убирает одну заметку — менеджер вычищает то, что бот понял не так."""
+    async with get_connection() as conn:
+        cursor = await conn.execute("DELETE FROM client_notes WHERE id = ?", (note_id,))
+        await conn.commit()
+        return cursor.rowcount > 0
+
+
+async def get_client_purchases(client_id: int, limit: int = 10) -> list[dict]:
+    """Что клиент действительно купил: позиции подтверждённых заказов, свежие сверху.
+
+    Берём снимки из order_items, а не текущий каталог: товар потом переименуют
+    или снимут с витрины, а купил человек именно то, что записано в заказе.
+    """
+    placeholders = ", ".join("?" * len(PURCHASED_STATUSES))
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"""SELECT i.title_snapshot, i.size, i.color, i.qty,
+                       o.id AS order_id, o.created_at, o.status
+                FROM order_items i
+                JOIN orders o ON o.id = i.order_id
+                WHERE o.client_id = ? AND o.status IN ({placeholders})
+                ORDER BY o.id DESC, i.id
+                LIMIT ?""",
+            (client_id, *PURCHASED_STATUSES, limit),
+        )
+        return _rows(await cursor.fetchall())
+
+
 # ─────────────────────── Расход на ИИ ───────────────────────
 
 

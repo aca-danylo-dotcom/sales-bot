@@ -600,6 +600,23 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 .timeline li.done { color: var(--text); }
 .timeline li.done::before { background: var(--accent); }
 
+/* ─── Память бота о клиенте ─── */
+
+.notes { list-style: none; margin: 0 0 12px; padding: 0; display: flex;
+         flex-direction: column; gap: 8px; }
+
+.notes li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: #f0f0f3;
+}
+/* Текст забирает всю свободную ширину, дата и кнопка прижаты вправо. */
+.notes .text { flex: 1; }
+.notes form { margin: 0; }
+
 /* ─── Переписка клиента с ботом ─── */
 
 .chat { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }

@@ -438,12 +438,18 @@ async def _run_and_reply(message: Message, bot: Bot) -> None:
     # соглашалась с размером, которого на складе нет. Теперь список товаров и
     # размеров в наличии у неё перед глазами на каждом сообщении.
     showcase = await queries.get_showcase()
+    # Память между разговорами. В модель уходит только хвост переписки, поэтому
+    # прошлые покупки и заметки о клиенте подставляем отдельной выжимкой —
+    # иначе постоянный покупатель каждый раз начинает знакомство заново.
+    purchases = await queries.get_client_purchases(user_id)
+    notes = await queries.get_client_notes(user_id)
     conv = _history_to_conversation(await queries.get_history(user_id, _MAX_HISTORY))
 
     await bot.send_chat_action(message.chat.id, "typing")
     try:
         text = await run_agent(
-            instructions=build_instructions(client, cart["count"], showcase),
+            instructions=build_instructions(
+                client, cart["count"], showcase, purchases, notes),
             conversation=conv,
             tools=TOOLS,
             tool_executor=build_executor(ctx),

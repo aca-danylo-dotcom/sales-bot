@@ -189,6 +189,31 @@
 </div>
 
 <div class="card">
+  <h2>Что бот помнит о клиенте</h2>
+  {# Эти строки уходят боту в промпт на каждом сообщении — по ним он и советует.
+     Понял человека не так («берёт мужу», а на самом деле себе) — удаляем, и в
+     следующем разговоре этого факта у него уже нет. #}
+  {% if client_notes %}
+  <ul class="notes">
+    {% for note in client_notes %}
+    <li>
+      <span class="text">{{ note.fact }}</span>
+      <span class="muted small">{{ note.created_at[:10] }}</span>
+      <form method="post" action="/orders/{{ order.id }}/client-note-delete">
+        <input type="hidden" name="note_id" value="{{ note.id }}">
+        <button class="btn ghost" type="submit">Забыть</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="muted small">Бот записывает такие факты сам, когда клиент о себе
+    рассказывает. Личные данные — телефон, адрес, карта — сюда не попадают.</p>
+  {% else %}
+  <p class="muted">Бот пока ничего о клиенте не запомнил.</p>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Переписка с ботом</h2>
   {# Последние реплики — чтобы не выяснять у клиента заново то, что он уже
      рассказал боту: какой размер мерил, о какой скидке спрашивал. #}

@@ -85,6 +85,7 @@ MESSAGES = {
     "taken": "Заказ теперь ваш.",
     "released": "Заказ свободен — его может взять любой менеджер.",
     "note": "Заметка сохранена.",
+    "note_deleted": "Бот больше не помнит этот факт о клиенте.",
     "saved": "Данные заказа сохранены.",
 }
 
@@ -259,6 +260,10 @@ async def order_card(request: web.Request) -> dict:
         other = await queries.get_client_orders(order["client_id"], limit=10)
         context["client_orders"] = [o for o in other if o["id"] != order["id"]]
         context["history"] = await queries.get_history(order["client_id"], limit=40)
+        # Память бота о клиенте — то, что уходит в промпт на каждом сообщении.
+        # Менеджеру она видна затем, чтобы понять, почему бот советует именно
+        # это, и вычистить факт, который бот понял не так.
+        context["client_notes"] = await queries.get_client_notes(order["client_id"])
     return context
 
 
@@ -396,6 +401,16 @@ async def order_contacts(request: web.Request) -> web.Response:
     _redirect(f"/orders/{order['id']}", ok="saved")
 
 
+async def client_note_delete(request: web.Request) -> web.Response:
+    """Убрать факт из памяти бота: он понял клиента не так — пусть забудет."""
+    order = await _order_or_404(request)
+    data = await request.post()
+    note_id = forms.integer(data.get("note_id"), minimum=1)
+    if note_id:
+        await queries.delete_client_note(note_id)
+    _redirect(f"/orders/{order['id']}", tab="client", ok="note_deleted")
+
+
 def setup_routes(app: web.Application) -> None:
     app.router.add_get("/orders", orders_list)
     app.router.add_get(r"/orders/{id:\d+}", order_card)
@@ -407,3 +422,4 @@ def setup_routes(app: web.Application) -> None:
     app.router.add_post(r"/orders/{id:\d+}/release", order_release)
     app.router.add_post(r"/orders/{id:\d+}/note", order_note)
     app.router.add_post(r"/orders/{id:\d+}/contacts", order_contacts)
+    app.router.add_post(r"/orders/{id:\d+}/client-note-delete", client_note_delete)

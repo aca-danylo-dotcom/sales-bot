@@ -22,7 +22,6 @@ import { NumberTicker } from "../components/number-ticker";
 import { BarChart } from "../components/charts/bar-chart";
 import { Bar } from "../components/charts/bar";
 import { BarXAxis } from "../components/charts/bar-x-axis";
-import { BarYAxis } from "../components/charts/bar-y-axis";
 import { Grid } from "../components/charts/grid";
 import { ChartTooltip } from "../components/charts/tooltip";
 import { FunnelChart } from "../components/charts/funnel-chart";
@@ -237,17 +236,20 @@ export default function Stats() {
 
         {sales.placed || sales.cancelled ? (
           <div className="chart">
+            {/* Оси только снизу: BarYAxis в библиотеке подписывает столбики
+                (для горизонтальных графиков, где категории идут по вертикали),
+                и на нашем графике она вывалила бы даты колонкой вдоль левого
+                края. Суммы человек видит в подсказке под курсором. */}
             <BarChart data={data.by_day} xDataKey="label" aspectRatio="3 / 1">
               <Grid horizontal />
-              <Bar dataKey="revenue" fill="var(--chart-1)" />
+              <Bar dataKey="revenue" fill="var(--chart-2)" />
               <BarXAxis maxLabels={10} />
-              <BarYAxis />
               <ChartTooltip
                 rows={(point) => [
                   {
                     label: "Выручка",
                     value: String(point.revenue_text ?? ""),
-                    color: "var(--chart-1)",
+                    color: "var(--chart-2)",
                   },
                 ]}
               />
@@ -273,7 +275,7 @@ export default function Stats() {
               value: step.value,
               displayValue: step.display,
             }))}
-            color="var(--chart-1)"
+            color="var(--chart-2)"
             layers={3}
             className="funnel"
           />

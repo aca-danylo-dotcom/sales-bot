@@ -89,6 +89,20 @@ _PHOTO_MIN_WIDTH = 700
 # что больше, — либо не фотография, либо попытка нагрузить бота.
 _PHOTO_MAX_BYTES = 4 * 1024 * 1024
 
+# Пометка о снимке в переписке: по ней и видно, что разговор идёт про фото.
+_PHOTO_MARK = "[фото от клиента]"
+
+# Сколько последних реплик разговор ещё считается «про присланный снимок».
+# Сама картинка уходит в модель один раз, а разговор о ней продолжается: клиент
+# отвечает «да» на встречный вопрос, уточняет цвет. Без правил про фото на это
+# «да» бот вываливал весь раздел каталога — как будто у него просили витрину.
+_PHOTO_CONTEXT_TURNS = 6
+
+# Сколько карточек шлём, пока речь о присланном фото. Клиент показал конкретную
+# вещь, а не попросил ассортимент: пять объявлений подряд в ответ на снимок
+# выглядят как «вот весь наш каталог, ищите сами».
+_PHOTO_MAX_CARDS = 3
+
 # Альбом (несколько фото одним сообщением) приходит несколькими апдейтами с общим
 # media_group_id. В модель отправляем только первый — иначе один жест клиента
 # оборачивается пятью платными запросами и пятью ответами подряд.
@@ -186,8 +200,23 @@ def _incoming_text(message: Message) -> str:
         return message.text
     caption = (message.caption or "").strip()
     if message.photo:
-        return ("[фото от клиента] " + caption).strip()
+        return (_PHOTO_MARK + " " + caption).strip()
     return caption
+
+
+def _photo_recent(history: list) -> bool:
+    """Разговор всё ещё про присланный снимок?
+
+    Сама картинка уходит в модель один раз, а беседа о ней тянется дальше: бот
+    спросил «показать похожее?», клиент ответил «да». Без правил про фото модель
+    на такое «да» понимала запрос как просьбу показать ассортимент и присылала
+    подряд весь раздел каталога. Пометку о снимке ищем в хвосте переписки — она
+    и есть след того, что речь про фото.
+    """
+    return any(
+        row["content"].startswith(_PHOTO_MARK)
+        for row in history[-_PHOTO_CONTEXT_TURNS:]
+    )
 
 
 def _photo_intro(message: Message) -> str:
@@ -577,7 +606,11 @@ async def _run_and_reply(message: Message, bot: Bot, image: str | None = None) -
     # иначе постоянный покупатель каждый раз начинает знакомство заново.
     purchases = await queries.get_client_purchases(user_id)
     notes = await queries.get_client_notes(user_id)
-    conv = _history_to_conversation(await queries.get_history(user_id, _MAX_HISTORY))
+    history = await queries.get_history(user_id, _MAX_HISTORY)
+    conv = _history_to_conversation(history)
+    # Правила про снимок держим ещё несколько реплик после него: разговор о фото
+    # не заканчивается тем сообщением, в котором фото пришло.
+    photo_talk = bool(image) or _photo_recent(history)
 
     if image and conv:
         # В базе последней лежит пометка «[фото от клиента]» — для менеджера. В
@@ -597,7 +630,7 @@ async def _run_and_reply(message: Message, bot: Bot, image: str | None = None) -
         text = await run_agent(
             instructions=build_instructions(
                 client, cart["count"], showcase, purchases, notes,
-                has_photo=bool(image)),
+                has_photo=bool(image), photo_talk=photo_talk),
             conversation=conv,
             tools=TOOLS,
             tool_executor=build_executor(ctx),
@@ -628,7 +661,8 @@ async def _run_and_reply(message: Message, bot: Bot, image: str | None = None) -
     # если сверх перечня ничего не сказано — уходят одни карточки. Товар в
     # корзине карточки не требует: она
     # про то, что уже лежит в корзине, и кнопка «В корзину» под ней только путает.
-    cards = [] if ctx.cart_added else await _cards_to_send(message, ctx, reply)
+    cards = [] if ctx.cart_added else await _cards_to_send(
+        message, ctx, reply, photo_talk=photo_talk)
 
     if reply:
         visible = _strip_lead_in(reply, cards)
@@ -708,7 +742,12 @@ def _mentioned_positions(titles: dict[int, str], reply: str) -> dict[int, int]:
     return positions
 
 
-async def _cards_to_send(message: Message, ctx: ClientContext, reply: str) -> list[dict]:
+async def _cards_to_send(
+    message: Message,
+    ctx: ClientContext,
+    reply: str,
+    photo_talk: bool = False,
+) -> list[dict]:
     """Карточки товаров, о которых консультант рассказал в этом ответе.
 
     Инструменты фото не отправляют (модель их не видит) — они лишь помечают
@@ -745,6 +784,9 @@ async def _cards_to_send(message: Message, ctx: ClientContext, reply: str) -> li
         seen = await queries.get_shown_cards(message.from_user.id, _CARD_REPEAT_HOURS)
         ordered = [pid for pid in ordered if pid not in seen]
 
-    ordered = ordered[:MAX_CARDS]
+    # Пока речь про присланный снимок, карточек шлём меньше: клиент показал одну
+    # конкретную вещь, и пять объявлений в ответ читаются как «вот весь каталог,
+    # ищите сами». Похожее — это две-три позиции, а не выкладка ассортимента.
+    ordered = ordered[:_PHOTO_MAX_CARDS if photo_talk else MAX_CARDS]
     await queries.remember_shown_cards(message.from_user.id, ordered)
     return [products[product_id] for product_id in ordered]

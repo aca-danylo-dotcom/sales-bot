@@ -56,6 +56,21 @@ _RATE_WINDOW = 60.0     # секунд
 _user_hits: dict[int, deque[float]] = {}
 _user_warned: dict[int, float] = {}
 
+# Сколько разных пользователей держим в памяти для лимита частоты. Словари живут
+# вечно, а ключ в них создаёт любой, кто написал боту хоть раз: при рассылке по
+# ботам это тысячи мёртвых записей. Дойдя до потолка, выкидываем тех, чьё окно
+# давно закрыто, — активным лимит от этого не сбивается.
+_RATE_USERS_MAX = 5000
+
+# Кому и когда уже сказали про суточный потолок (день по времени магазина).
+# Ключ — клиент, значение — 'YYYY-MM-DD': повторять это сообщение на каждое
+# следующее его сообщение бессмысленно, а один раз в сутки — честно.
+_daily_warned: dict[int, str] = {}
+# День, в который владельцу уже ушло письмо про общий потолок. Тоже один раз:
+# упёршись в потолок, бот молчит для всех, и десять одинаковых сообщений подряд
+# владельцу ничего не добавят.
+_total_reported_day: str = ""
+
 # Максимум символов во входящем сообщении: каждый символ — токены в платный ИИ.
 # Лимит щедрый — живой покупатель его не заметит, а намеренный раздув отсекается.
 _MAX_INPUT_CHARS = 1000
@@ -71,9 +86,26 @@ def _get_lock(user_id: int) -> asyncio.Lock:
     return _user_locks.setdefault(user_id, asyncio.Lock())
 
 
+def _forget_idle(now: float) -> None:
+    """Убирает из памяти лимитов тех, кто давно не писал."""
+    for stale in [uid for uid, hits in _user_hits.items()
+                  if not hits or now - hits[-1] > _RATE_WINDOW]:
+        lock = _user_locks.get(stale)
+        # Занятый замок не трогаем: у клиента прямо сейчас думает модель, а
+        # новый замок вместо него пустил бы следующее сообщение в обработку
+        # параллельно — это гонка и дубль товара в корзине.
+        if lock is not None and lock.locked():
+            continue
+        _user_hits.pop(stale, None)
+        _user_warned.pop(stale, None)
+        _user_locks.pop(stale, None)
+
+
 def _rate_ok(user_id: int) -> bool:
     """True — сообщение в пределах лимита; False — лимит превышен."""
     now = time.monotonic()
+    if len(_user_hits) > _RATE_USERS_MAX:
+        _forget_idle(now)
     hits = _user_hits.setdefault(user_id, deque())
     while hits and now - hits[0] > _RATE_WINDOW:
         hits.popleft()
@@ -90,6 +122,82 @@ def _should_warn(user_id: int) -> bool:
         _user_warned[user_id] = now
         return True
     return False
+
+
+async def _daily_ok(message: Message, bot: Bot, user_id: int) -> bool:
+    """Суточные потолки платных запросов: True — можно идти в модель.
+
+    Два рубежа. Первый — на клиента: обычный покупатель за день не пишет и сотни
+    сообщений, а тот, кто пишет тысячи, платит нашими деньгами за чужой трафик.
+    Второй — на весь бот: если аккаунтов много, персональный лимит их не удержит.
+
+    Счётчик увеличиваем ТОЛЬКО когда запрос действительно уходит в модель:
+    иначе упёршийся клиент своими же отбитыми сообщениями накручивал бы общий
+    потолок и валил бота для остальных.
+    """
+    global _total_reported_day
+
+    mine, total = await queries.get_ai_usage(user_id)
+    today = config.today_local().isoformat()
+
+    if total >= config.AI_DAILY_TOTAL:
+        logger.error(
+            "Достигнут общий суточный потолок запросов к ИИ (%d) — бот отвечать не будет",
+            config.AI_DAILY_TOTAL,
+        )
+        if _total_reported_day != today:
+            _total_reported_day = today
+            try:
+                await bot.send_message(
+                    config.ADMIN_ID,
+                    f"⚠️ Бот за сегодня израсходовал дневной лимит запросов к ИИ "
+                    f"({config.AI_DAILY_TOTAL}) и больше не отвечает покупателям.\n\n"
+                    "Так выглядит либо очень удачный день, либо накрутка. "
+                    "Лимит поднимается переменной AI_DAILY_TOTAL.",
+                )
+            except Exception:  # владелец мог заблокировать бота
+                logger.exception("Не удалось предупредить владельца о лимите ИИ")
+        if _should_warn(user_id):
+            await message.answer(
+                "Извините, сегодня я уже не справляюсь с потоком сообщений. "
+                "Напишите, пожалуйста, завтра — или оставьте вопрос, менеджер "
+                "ответит вам сам 🙏",
+                reply_markup=main_menu(),
+            )
+        return False
+
+    if mine >= config.AI_DAILY_PER_CLIENT:
+        logger.warning("Клиент %s выбрал суточный лимит запросов к ИИ (%d)",
+                       user_id, config.AI_DAILY_PER_CLIENT)
+        if _daily_warned.get(user_id) != today:
+            _daily_warned[user_id] = today
+            # Сообщение, на которое бот не ответил, всё же кладём в переписку:
+            # менеджер в CRM должен видеть, чем человек закончил. Дальнейшие его
+            # сообщения уже не пишем — иначе спам раздувает таблицу.
+            await queries.add_message(user_id, "user", message.text)
+            await queries.trim_history(user_id, _KEEP_HISTORY)
+            # Владельцу — один раз за сутки на клиента. Живой покупатель до этой
+            # черты не доходит, так что каждый такой случай стоит увидеть: это
+            # либо накрутка, либо человек, которому бот так и не помог.
+            try:
+                await bot.send_message(
+                    config.ADMIN_ID,
+                    f"⚠️ Клиент {user_id} за сегодня выбрал дневной лимит "
+                    f"сообщений ({config.AI_DAILY_PER_CLIENT}) — бот ему больше "
+                    "не отвечает. Переписка есть в CRM.",
+                )
+            except Exception:  # владелец мог заблокировать бота
+                logger.exception("Не удалось предупредить владельца о лимите клиента")
+            await message.answer(
+                "На сегодня мы с вами наговорились 🙂 Я отвечу завтра — "
+                "а если вопрос срочный, напишите его одним сообщением, "
+                "менеджер прочитает.",
+                reply_markup=main_menu(),
+            )
+        return False
+
+    await queries.bump_ai_usage(user_id)
+    return True
 
 
 # Ведущий маркер строки: кружочек/звёздочка/дефис-список, заголовок #, цитата >.
@@ -301,6 +409,11 @@ async def on_text(message: Message, bot: Bot) -> None:
                 "пожалуйста, через минуту.",
                 reply_markup=main_menu(),
             )
+        return
+
+    # Суточный потолок — последний рубеж перед платным запросом: минутный лимит
+    # держит очередь сообщений подряд, но не ровный поток сутки напролёт.
+    if not await _daily_ok(message, bot, user_id):
         return
 
     async with _get_lock(user_id):

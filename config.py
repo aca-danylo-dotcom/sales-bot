@@ -77,6 +77,16 @@ AI_REASONING_EFFORT: str = os.getenv("AI_REASONING_EFFORT", "low")  # low/medium
 AI_PRICE_IN: float = float(os.getenv("AI_PRICE_IN", "0"))    # за 1M входных токенов
 AI_PRICE_OUT: float = float(os.getenv("AI_PRICE_OUT", "0"))  # за 1M выходных токенов
 
+# Суточные потолки платных запросов к модели (счётчик — в таблице ai_usage).
+# Минутный лимит частоты (см. handlers/client.py) спасает от очереди сообщений
+# подряд, но не от ровного потока сутки напролёт: 10 сообщений в минуту — это
+# больше 14 000 запросов за ночь и высаженный баланс провайдера.
+# На клиента: живой покупатель за день пишет десятки сообщений, не сотни.
+AI_DAILY_PER_CLIENT: int = int(os.getenv("AI_DAILY_PER_CLIENT", "150"))
+# На весь бот: последний рубеж, если пишет сразу много аккаунтов. Ставьте с
+# запасом к обычному дню магазина — упёршись в него, бот замолчит для всех.
+AI_DAILY_TOTAL: int = int(os.getenv("AI_DAILY_TOTAL", "3000"))
+
 # --- Отчёт в Agent Stats (дашборд агентства) ---
 # Сами адрес и ключ читает services/agent_stats.py из тех же переменных окружения:
 #   AGENT_STATS_URL, AGENT_STATS_KEY, AGENT_STATS_TIMEOUT.

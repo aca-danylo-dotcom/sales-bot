@@ -1668,6 +1668,53 @@ async def trim_history(client_id: int, keep: int = 200) -> None:
         await conn.commit()
 
 
+# ─────────────────────── Расход на ИИ ───────────────────────
+
+
+async def bump_ai_usage(client_id: int) -> tuple[int, int]:
+    """Отмечает ещё один платный запрос к модели и возвращает (за клиента, всего) за сегодня.
+
+    Считается ДО обращения к модели: смысл счётчика — не пустить запрос сверх
+    потолка, а не посчитать уже потраченное. Обе цифры берутся одним заходом в
+    базу, потому что проверяются вместе.
+
+    Старые дни не чистим отдельно: строка на клиента в сутки — это единицы
+    килобайт в год, а история расхода потом пригодится для отчёта.
+    """
+    day = config.today_local().isoformat()
+    async with get_connection() as conn:
+        await conn.execute(
+            """INSERT INTO ai_usage (client_id, day, count) VALUES (?, ?, 1)
+               ON CONFLICT(client_id, day) DO UPDATE SET count = count + 1""",
+            (client_id, day),
+        )
+        await conn.commit()
+        cursor = await conn.execute(
+            """SELECT
+                   COALESCE(SUM(CASE WHEN client_id = ? THEN count END), 0) AS mine,
+                   COALESCE(SUM(count), 0) AS total
+               FROM ai_usage WHERE day = ?""",
+            (client_id, day),
+        )
+        row = await cursor.fetchone()
+        return int(row["mine"]), int(row["total"])
+
+
+async def get_ai_usage(client_id: int) -> tuple[int, int]:
+    """(за клиента, всего) за сегодня — без изменения счётчика."""
+    day = config.today_local().isoformat()
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT
+                   COALESCE(SUM(CASE WHEN client_id = ? THEN count END), 0) AS mine,
+                   COALESCE(SUM(count), 0) AS total
+               FROM ai_usage WHERE day = ?""",
+            (client_id, day),
+        )
+        row = await cursor.fetchone()
+        return int(row["mine"]), int(row["total"])
+
+
 # ─────────────────────── Показанные карточки ───────────────────────
 
 

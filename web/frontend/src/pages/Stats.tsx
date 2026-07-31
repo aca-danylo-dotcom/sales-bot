@@ -157,7 +157,7 @@ export default function Stats() {
   }));
 
   return (
-    <>
+    <div className="stats">
       <Head
         title="Статистика"
         lead={`${data.date_from} — ${data.date_to} · ${data.days} ${
@@ -177,7 +177,7 @@ export default function Stats() {
             <button
               key={preset.days}
               type="button"
-              className={`btn ghost ${data.days === preset.days ? "on" : ""}`}
+              className={`btn ${data.days === preset.days ? "on" : ""}`}
               onClick={() => applyPreset(preset.days)}
             >
               {preset.title}
@@ -398,10 +398,20 @@ export default function Stats() {
               onHoverChange={setHovered}
               className="pie-legend"
             >
-              <LegendItem>
-                <LegendMarker />
-                <LegendLabel />
-                <LegendValue />
+              {/* Строкой, а не столбиком: без раскладки компонент ставит
+                  маркер, название и сумму друг под другом, и список из восьми
+                  товаров разъезжается. Длинные названия обрезаем — полные
+                  видно в таблице ниже. Суммы форматирует сервер. */}
+              <LegendItem className="flex items-center gap-2">
+                <LegendMarker className="h-2.5 w-2.5 shrink-0" />
+                <LegendLabel className="min-w-0 flex-1 truncate text-sm" />
+                <LegendValue
+                  className="shrink-0 text-sm tabular-nums"
+                  formatValue={(value) =>
+                    products.top.find((row) => row.revenue === value)?.revenue_text ??
+                    String(value)
+                  }
+                />
               </LegendItem>
             </Legend>
           </div>
@@ -478,6 +488,6 @@ export default function Stats() {
         ) : null}
       </section>
       </div>
-    </>
+    </div>
   );
 }

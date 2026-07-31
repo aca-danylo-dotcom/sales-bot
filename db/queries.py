@@ -1365,6 +1365,20 @@ async def mark_paid_claimed(order_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+async def set_admin_msg_id(order_id: int, message_id: int | None) -> None:
+    """Запоминает id пуша владельцу по заказу.
+
+    Нужно, чтобы следующее сообщение по тому же заказу («клиент оплатил») не
+    легло рядом с предыдущим, а заменило его: владельцу важен один актуальный
+    разбор заказа, а не лента из похожих сообщений.
+    """
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE orders SET admin_msg_id = ? WHERE id = ?", (message_id, order_id)
+        )
+        await conn.commit()
+
+
 async def cancel_order(order_id: int, *, note: str | None = None) -> bool:
     """Отменяет заказ и возвращает товар на склад. True — заказ действительно отменён.
 

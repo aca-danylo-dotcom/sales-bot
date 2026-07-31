@@ -129,6 +129,10 @@ CREATE TABLE IF NOT EXISTS orders (
     ttn          TEXT,                          -- номер накладной Новой Почты
     assignee     TEXT,                          -- менеджер, взявший заказ в работу
     note         TEXT,                          -- внутренняя заметка, клиент не видит
+    -- id пуша владельцу по этому заказу. Когда клиент нажимает «Я оплатил»,
+    -- прежний пуш удаляется и вместо него приходит новый: иначе в чате
+    -- владельца копятся сообщения об одном и том же заказе.
+    admin_msg_id INTEGER,
     created_at   TEXT    NOT NULL,
     paid_at      TEXT,                          -- когда клиент нажал «Я оплатил»
     confirmed_at TEXT,                          -- когда оплату подтвердили
@@ -196,6 +200,7 @@ CREATE TABLE IF NOT EXISTS shown_cards (
 _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("carts", "reminded_at", "TEXT"),
     ("product_photos", "content_hash", "TEXT"),
+    ("orders", "admin_msg_id", "INTEGER"),
 ]
 
 

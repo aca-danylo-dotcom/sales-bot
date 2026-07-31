@@ -254,8 +254,9 @@ def payment_text(order: dict) -> str:
     )
 
 
-# Заголовки пушей владельцу. Полный разбор заказа приходит один раз — при
-# оформлении; про оплату уходит короткая строка (см. admin_order_text).
+# Заголовки пушей владельцу. Меняется только шапка — разбор заказа под ней
+# один и тот же: владельцу нужен полный текст в обоих случаях, а какое из
+# сообщений останется в чате, решает notify_admin_order.
 _ADMIN_HEADERS = {
     "new": ("🆕 <b>Новый заказ №{id}</b>",
             "Реквизиты клиенту отправлены, ждём оплату."),
@@ -266,21 +267,14 @@ _ADMIN_HEADERS = {
 
 def admin_order_text(order: dict, username: str | None = None,
                      kind: str = "paid") -> str:
-    """Пуш владельцу о заказе.
+    """Пуш владельцу о заказе: состав, сумма, получатель, контакт клиента.
 
-    Состав, сумма и контакты — только в пуше при оформлении. Про оплату уходит
-    короткое сообщение: раньше оно повторяло тот же разбор целиком, и в чате
-    висели два почти одинаковых сообщения об одном заказе.
+    Короткого варианта нет намеренно. Пуш об оплате — то сообщение, по которому
+    владелец принимает решение, и лезть за составом и адресом в переписку выше
+    он не должен.
     """
     header, hint = _ADMIN_HEADERS[kind]
     contact = f"@{username}" if username else f"id {order['client_id']}"
-    if kind == "paid":
-        return "\n".join([
-            header.format(id=order["id"]),
-            f"Сумма: <b>{money(order['total'])}</b> · {_esc(order['name'])}, "
-            f"{_esc(order['phone'])}",
-            hint,
-        ])
     lines = [
         header.format(id=order["id"]),
         hint,
@@ -369,13 +363,30 @@ async def notify_admin_order(bot: Bot, order: dict, username: str | None,
                              kind: str = "paid") -> None:
     """Пуш владельцу о заказе. Ошибку глушим — заказ уже создан.
 
+    По заказу в чате владельца висит ровно одно сообщение: перед отправкой
+    нового прежний пуш удаляется. Клиент нажимает «Я оплатил» через минуту
+    после оформления, и без этого рядом лежали два сообщения об одном заказе —
+    непонятно, какое из них актуальное.
+
+    Именно удаление, а не правка текста: правка не поднимает сообщение в чате и
+    не даёт уведомления, а про оплату владелец должен узнать сразу.
+
     Кнопки «Оплата пришла» / «Отклонить» вешаем на оба пуша: деньги часто
     приходят раньше, чем клиент вспоминает про кнопку «Я оплатил», и владелец
     должен уметь закрыть заказ с первого же сообщения. Повторное решение по
     тому же заказу отсекается проверкой статуса в handlers/admin.py.
     """
+    previous = order.get("admin_msg_id")
+    if previous:
+        try:
+            await bot.delete_message(config.ADMIN_ID, previous)
+        except (TelegramForbiddenError, TelegramBadRequest):
+            # Сообщение старше двух суток или уже удалено руками — не беда,
+            # новое всё равно уйдёт.
+            logger.info("Прежний пуш по заказу %s удалить не удалось", order["id"])
+
     try:
-        await bot.send_message(
+        sent = await bot.send_message(
             config.ADMIN_ID,
             admin_order_text(order, username, kind),
             reply_markup=admin_order_kb(order["id"]),
@@ -383,6 +394,9 @@ async def notify_admin_order(bot: Bot, order: dict, username: str | None,
         )
     except (TelegramForbiddenError, TelegramBadRequest):
         logger.exception("Не удалось отправить заявку по заказу %s владельцу", order["id"])
+        return
+
+    await queries.set_admin_msg_id(order["id"], sent.message_id)
 
 
 # ─────────────────────────── Корзина ───────────────────────────

@@ -1132,48 +1132,10 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 
 /* ─── График выручки ─── */
 
-/* Высота задана здесь, а не в компоненте: Recharts растягивается по родителю,
-   и без высоты ему нечего заполнять. 204 = поле графика плюс строка с датами.
-   Пропорцию, которую обвязка Chart ставит по умолчанию, здесь отменяем: у
-   карточки своя высота, а не 16:9. */
-.chart-area {
-  height: 204px;
-  aspect-ratio: auto;
-  margin: 6px 0 2px;
-}
-
-/* Линии-опоры: пунктир едва заметен. Считать по ним никто не будет — суммы
-   даёт подсказка, а сплошные линии спорили бы с самой кривой. */
-.chart-area .recharts-cartesian-grid line {
-  stroke: #eef0f6;
-  stroke-dasharray: 3 6;
-}
-
-.chart-area .recharts-cartesian-axis-tick text {
-  fill: var(--muted);
-  font-size: 12px;
-}
-
-/* Подсказка. Обвязка из реестра рисует её светлой карточкой с рамкой — в
-   разделе она встала бы поверх такой же белой карточки и потерялась. Здесь
-   это тёмная пилюля, как было на макете: день сверху, сумма под ним. */
-.chart-area .area-tip {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  padding: 7px 11px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--chart-tooltip-background);
-  color: var(--chart-tooltip-foreground);
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: nowrap;
-  box-shadow: 0 6px 18px rgba(20, 26, 60, 0.18);
-}
-.chart-area .area-tip > div:first-child { color: var(--chart-tooltip-muted); }
-.area-tip-value { font-weight: 600; font-size: 13px; }
+/* Размер и вид задаёт сама обвязка Chart — как в демо реестра. Здесь только
+   воздух вокруг: график стоит под цифрами продаж, и без отступа линия
+   прилипает к нижней из них. */
+.chart-area { margin: 10px 0 2px; }
 
 /* Воронка: пять цветных плашек с зазорами, высота — по числу заказов.
 

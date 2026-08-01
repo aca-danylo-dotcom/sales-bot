@@ -1,22 +1,24 @@
 /**
- * Выручка по дням — плавная линия с заливкой под ней.
+ * Выручка по дням — областной график.
  *
- * Раньше здесь стояли столбики. Владелец нарисовал линию, и для этих данных она
- * честнее: столбик читается как «отдельная величина», а выручка по дням —
- * непрерывный ход, у которого важна форма, а не высота каждого дня.
+ * Собран по демо со страницы Chart реестра shadcn/ui, на которую владелец
+ * прислал ссылку: те же настройки заливки (плотная сверху, почти прозрачная
+ * снизу), та же сетка, тот же вид подсказки — белая карточка с точкой цвета
+ * ряда. Отличий от их примера два, и оба вынужденные:
  *
- * Рисует Recharts через обвязку Chart из реестра shadcn/ui — владелец прислал
- * ссылку на неё. До этого график был написан руками; вид остался прежним, но
- * пропало полсотни строк своей математики: попадание курсора в день, прореживание
- * подписей под узкую карточку и удержание подсказки в границах карточки теперь
- * не наши заботы. Взамен на страницу приезжает библиотека — «Статистика» грузится
- * отдельным куском (см. App.tsx), так что остальных разделов это не касается.
- *
- * Подписей по левому краю нет — это макет. Значит, число должно доставаться
- * иначе: наводишь на график, и день с суммой показываются в подсказке.
+ * 1. Ряд один. У них их два ради красоты примера, у нас на этой оси есть
+ *    только деньги: класть рядом число заказов значило бы мерить штуки
+ *    гривнами.
+ * 2. Сумму в подсказке рисуем сами. Их разметка показывает голое число, а
+ *    сервер уже присылает её словами — «2 400 грн». Раскладка строки при этом
+ *    ровно их: точка, название ряда, значение справа.
+ * 3. Сглаживание `monotone` вместо их `natural`. На ровных данных примера
+ *    разницы не видно, а у нас между продажами стоят нули, и `natural`
+ *    вылетала за них горбами: график показывал выручку в дни, когда не
+ *    продали ничего. `monotone` за крайние точки не выходит.
  */
 import { useId } from "react";
-import { Area, AreaChart, CartesianGrid, ReferenceDot, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, XAxis } from "recharts";
 
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "../ui/chart";
 import type { ChartConfig } from "../ui/chart";
@@ -36,43 +38,48 @@ export function RevenueArea({ data }: { data: Point[] }) {
 
   if (data.length === 0) return null;
 
-  const last = data[data.length - 1];
-
   return (
-    <ChartContainer className="chart-area" config={config}>
-      <AreaChart data={data} margin={{ top: 16, right: 20, bottom: 0, left: 20 }}>
+    <ChartContainer className="chart-area aspect-auto h-[250px] w-full" config={config}>
+      {/* Поля по бокам — под крайние подписи: они стоят по центру своего дня,
+          и без запаса «01.08» срезалось бы краем карточки. */}
+      <AreaChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 16 }}>
         <defs>
           <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-revenue)" stopOpacity={0.24} />
-            <stop offset="100%" stopColor="var(--color-revenue)" stopOpacity={0} />
+            <stop offset="5%" stopColor="var(--color-revenue)" stopOpacity={0.8} />
+            <stop offset="95%" stopColor="var(--color-revenue)" stopOpacity={0.1} />
           </linearGradient>
         </defs>
 
-        {/* Ось слева спрятана: цифры даёт подсказка. Нужна она ради делений —
-            по ним строятся линии-опоры, а без оси их было бы пять вместо
-            четырёх, и сетка спорила бы с самой кривой. */}
-        <YAxis hide domain={[0, "dataMax"]} tickCount={4} />
         <CartesianGrid vertical={false} />
 
-        {/* minTickGap прореживает даты сам: на широкой карточке подписей больше,
-            на телефоне меньше, склеиться в кашу они не могут. */}
+        {/* minTickGap прореживает даты сам: на широкой карточке подписей
+            больше, на телефоне меньше, склеиться в кашу они не могут. */}
         <XAxis
           dataKey="label"
           tickLine={false}
           axisLine={false}
-          tickMargin={10}
-          minTickGap={28}
-          interval="preserveStartEnd"
+          tickMargin={8}
+          minTickGap={32}
         />
 
         <ChartTooltip
-          cursor={{ stroke: "#ccd4e6", strokeWidth: 1, strokeDasharray: "4 4" }}
+          cursor={false}
           content={
             <ChartTooltipContent
-              className="area-tip"
-              hideIndicator
+              indicator="dot"
               formatter={(_value, _name, item) => (
-                <span className="area-tip-value">{(item.payload as Point).revenue_text}</span>
+                <>
+                  <div
+                    className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+                    style={{ background: "var(--color-revenue)" }}
+                  />
+                  <div className="flex flex-1 items-center justify-between gap-3 leading-none">
+                    <span className="text-muted-foreground">Выручка</span>
+                    <span className="font-medium tabular-nums">
+                      {(item.payload as Point).revenue_text}
+                    </span>
+                  </div>
+                </>
               )}
             />
           }
@@ -83,26 +90,6 @@ export function RevenueArea({ data }: { data: Point[] }) {
           type="monotone"
           fill={`url(#${gradient})`}
           stroke="var(--color-revenue)"
-          strokeWidth={2.6}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          dot={false}
-          /* Recharts по умолчанию «рисует» линию при каждом появлении данных.
-             Здесь это лишнее: период переключают прямо на странице, и график
-             заново прочерчивался бы после каждого нажатия. */
-          isAnimationActive={false}
-          activeDot={{ r: 5, fill: "var(--chart-1)", stroke: "#fff", strokeWidth: 3 }}
-        />
-
-        {/* Точка на последнем дне: без курсора взгляд должен видеть, где «сейчас».
-            Белое кольцо — иначе на заливке того же цвета точка пропадает. */}
-        <ReferenceDot
-          x={last.label}
-          y={last.revenue}
-          r={5}
-          fill="var(--chart-1)"
-          stroke="#fff"
-          strokeWidth={3}
         />
       </AreaChart>
     </ChartContainer>

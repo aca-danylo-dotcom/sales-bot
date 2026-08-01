@@ -627,6 +627,12 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 .tab:hover { background: #e2e2e7; text-decoration: none; }
 .tab.active { background: var(--text); color: #fff; }
 
+/* Выбранная вкладка под курсором. Строка не лишняя: цвет подписи иначе задаёт
+   общее правило `.tabs a:hover` — оно специфичнее, красит текст в чёрный, и на
+   почти чёрной пилюле надпись пропадала целиком. Фон при этом чуть светлеет,
+   чтобы наведение всё-таки отзывалось. */
+.tab.active:hover { background: #3a3a3c; color: #fff; }
+
 .tab .count { color: var(--muted); font-size: 12px; }
 .tab.active .count { color: rgba(255, 255, 255, 0.7); }
 

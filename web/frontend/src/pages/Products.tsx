@@ -11,6 +11,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { get, query as buildQuery } from "../api/client";
+import { ProductFilters } from "../components/product-filters";
 import { EmptyState, Head, Loading, LoadError, Pager, Tag } from "../components/ui";
 import { usePageTitle } from "../lib/meta";
 
@@ -69,8 +70,7 @@ export default function Products() {
   const filtersQs = buildQuery(filters);
   const hasFilters = Boolean(filtersQs);
 
-  const applyFilters = (event: React.FormEvent) => {
-    event.preventDefault();
+  const applyFilters = () => {
     // Новый отбор — с первой страницы: на третьей его результатов может не быть.
     setParams(new URLSearchParams(buildQuery(draft).replace("?", "")));
   };
@@ -93,50 +93,19 @@ export default function Products() {
         <Link to={`/products/stock${filtersQs}`}>Остатки по размерам</Link>
       </nav>
 
-      <form className="filters card" onSubmit={applyFilters}>
-        <input
-          type="search"
-          value={draft.q}
-          autoComplete="off"
-          placeholder="Название, артикул или id"
-          onChange={(event) => setDraft({ ...draft, q: event.target.value })}
-        />
-        <select
-          value={draft.category}
-          onChange={(event) => setDraft({ ...draft, category: event.target.value })}
-        >
-          <option value="">Все категории</option>
-          {data.categories.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-        <select
-          value={draft.status}
-          onChange={(event) => setDraft({ ...draft, status: event.target.value })}
-        >
-          <option value="">Все</option>
-          <option value="active">В продаже</option>
-          <option value="hidden">Скрытые</option>
-        </select>
-        <select
-          value={draft.stock}
-          onChange={(event) => setDraft({ ...draft, stock: event.target.value })}
-        >
-          <option value="">Любой остаток</option>
-          <option value="in">Есть в наличии</option>
-          <option value="out">Закончились</option>
-        </select>
-        <button className="btn" type="submit">
-          Показать
-        </button>
-        {hasFilters ? (
-          <Link className="btn ghost" to="/products">
-            Сбросить
-          </Link>
-        ) : null}
-      </form>
+      <ProductFilters
+        categories={data.categories}
+        draft={draft}
+        onChange={setDraft}
+        onSubmit={applyFilters}
+        reset={
+          hasFilters ? (
+            <Link className="btn ghost" to="/products">
+              Сбросить
+            </Link>
+          ) : null
+        }
+      />
 
       {data.products.length ? (
         <>

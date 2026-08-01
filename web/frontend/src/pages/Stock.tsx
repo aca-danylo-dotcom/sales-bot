@@ -14,6 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { get, query as buildQuery } from "../api/client";
+import { ProductFilters } from "../components/product-filters";
 import { EmptyState, Head, Loading, LoadError } from "../components/ui";
 import { useAction } from "../lib/actions";
 import { usePageTitle } from "../lib/meta";
@@ -87,56 +88,19 @@ export default function Stock() {
         </Link>
       </nav>
 
-      <form
-        className="filters card"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setParams(new URLSearchParams(buildQuery(draft).replace("?", "")));
-        }}
-      >
-        <input
-          type="search"
-          value={draft.q}
-          autoComplete="off"
-          placeholder="Название, артикул или id"
-          onChange={(event) => setDraft({ ...draft, q: event.target.value })}
-        />
-        <select
-          value={draft.category}
-          onChange={(event) => setDraft({ ...draft, category: event.target.value })}
-        >
-          <option value="">Все категории</option>
-          {data.categories.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-        <select
-          value={draft.status}
-          onChange={(event) => setDraft({ ...draft, status: event.target.value })}
-        >
-          <option value="">Все</option>
-          <option value="active">В продаже</option>
-          <option value="hidden">Скрытые</option>
-        </select>
-        <select
-          value={draft.stock}
-          onChange={(event) => setDraft({ ...draft, stock: event.target.value })}
-        >
-          <option value="">Любой остаток</option>
-          <option value="in">Есть в наличии</option>
-          <option value="out">Закончились</option>
-        </select>
-        <button className="btn" type="submit">
-          Показать
-        </button>
-        {filtersQs ? (
-          <Link className="btn ghost" to="/products/stock">
-            Сбросить
-          </Link>
-        ) : null}
-      </form>
+      <ProductFilters
+        categories={data.categories}
+        draft={draft}
+        onChange={setDraft}
+        onSubmit={() => setParams(new URLSearchParams(buildQuery(draft).replace("?", "")))}
+        reset={
+          filtersQs ? (
+            <Link className="btn ghost" to="/products/stock">
+              Сбросить
+            </Link>
+          ) : null
+        }
+      />
 
       {data.rows.length ? (
         <form onSubmit={submit}>

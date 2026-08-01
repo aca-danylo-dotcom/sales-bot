@@ -10,6 +10,9 @@
    уже работает. Tailwind подключён поверх и применяется только к новому. */
 
 @import "tailwindcss";
+/* Появление выпадающего списка. Компоненты реестра описывают его классами
+   вроде `data-entering:animate-in`, а сами эти классы живут здесь. */
+@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -558,6 +561,52 @@ input[type="file"]:hover { border-color: #d6d6dc; }
 .filters input[type="search"] { flex: 2 1 240px; width: auto; }
 .filters select { flex: 1 1 150px; width: auto; }
 
+/* Списки отбора — компонент Select из реестра shadcn/ui. Он приезжает со
+   своими размерами (кнопка в 32 пикселя высотой, скругление 8), и рядом с
+   полем поиска это выглядело бы как чужая деталь. Ниже — приведение к виду
+   остальных полей панели: те же отступы, скругление, рамка и подсветка. */
+.filters [data-slot="select"] { flex: 1 1 150px; width: auto; }
+
+.filters [data-slot="select-trigger"] {
+  height: auto;
+  padding: 10px 12px 10px 14px;
+  border-radius: 12px;
+  border-color: var(--line);
+  background: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+.filters [data-slot="select-trigger"]:hover { border-color: #d6d6dc; }
+.filters [data-slot="select-trigger"][data-focus-visible],
+.filters [data-slot="select-trigger"][data-pressed] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Сам список висит в конце страницы, а не внутри формы, — отбирать его по
+   .filters нельзя. Другого Select в панели нет, поэтому берём по слоту. */
+[data-slot="select-content"] {
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow:
+    0 1px 2px rgba(20, 26, 60, 0.06),
+    0 12px 32px rgba(20, 26, 60, 0.14);
+}
+
+[data-slot="select-item"] {
+  padding: 8px 30px 8px 12px;
+  border-radius: 9px;
+  font-size: 15px;
+}
+[data-slot="select-item"][data-focused],
+[data-slot="select-item"][data-hovered] {
+  background: #f5f5f7;
+  color: var(--text);
+}
+[data-slot="select-item"][data-selected] { font-weight: 500; }
+[data-slot="select-item"][data-selected] svg { color: var(--accent); }
+
 /* ─── Таблицы ─── */
 
 .table-wrap { overflow-x: auto; padding: 8px 10px; }
@@ -1083,49 +1132,47 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 
 /* ─── График выручки ─── */
 
-/* Высота задана здесь, а не в компоненте: ParentSize меряет родителя, и без
-   высоты у него нечего мерить. 204 = поле графика плюс строка с датами. */
+/* Высота задана здесь, а не в компоненте: Recharts растягивается по родителю,
+   и без высоты ему нечего заполнять. 204 = поле графика плюс строка с датами.
+   Пропорцию, которую обвязка Chart ставит по умолчанию, здесь отменяем: у
+   карточки своя высота, а не 16:9. */
 .chart-area {
-  position: relative;
   height: 204px;
+  aspect-ratio: auto;
   margin: 6px 0 2px;
 }
 
 /* Линии-опоры: пунктир едва заметен. Считать по ним никто не будет — суммы
    даёт подсказка, а сплошные линии спорили бы с самой кривой. */
-.area-grid { stroke: #eef0f6; stroke-dasharray: 3 6; }
-
-.area-line {
-  fill: none;
-  stroke: var(--chart-1);
-  stroke-width: 2.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.chart-area .recharts-cartesian-grid line {
+  stroke: #eef0f6;
+  stroke-dasharray: 3 6;
 }
 
-/* Точка в белом кольце: на заливке того же цвета без кольца она пропадает. */
-.area-dot { fill: var(--chart-1); stroke: #fff; stroke-width: 3; }
+.chart-area .recharts-cartesian-axis-tick text {
+  fill: var(--muted);
+  font-size: 12px;
+}
 
-.area-cursor { stroke: #ccd4e6; stroke-width: 1; stroke-dasharray: 4 4; }
-
-.area-label { fill: var(--muted); font-size: 12px; text-anchor: middle; }
-
-.area-tip {
-  position: absolute;
-  transform: translate(-50%, -100%);
+/* Подсказка. Обвязка из реестра рисует её светлой карточкой с рамкой — в
+   разделе она встала бы поверх такой же белой карточки и потерялась. Здесь
+   это тёмная пилюля, как было на макете: день сверху, сумма под ним. */
+.chart-area .area-tip {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-width: 0;
   padding: 7px 11px;
+  border: 0;
   border-radius: 10px;
   background: var(--chart-tooltip-background);
   color: var(--chart-tooltip-foreground);
   font-size: 12px;
   line-height: 1.35;
   white-space: nowrap;
-  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(20, 26, 60, 0.18);
 }
-.area-tip-day { color: var(--chart-tooltip-muted); }
+.chart-area .area-tip > div:first-child { color: var(--chart-tooltip-muted); }
 .area-tip-value { font-weight: 600; font-size: 13px; }
 
 /* Воронка: пять цветных плашек с зазорами, высота — по числу заказов.

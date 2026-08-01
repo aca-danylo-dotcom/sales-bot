@@ -439,7 +439,7 @@ export default function OrderCard() {
           <div className="card">
             <h2>Другие заказы</h2>
             {data.client_orders?.length ? (
-              <table className="grid">
+              <table className="data-grid">
                 <thead>
                   <tr>
                     <th>Заказ</th>

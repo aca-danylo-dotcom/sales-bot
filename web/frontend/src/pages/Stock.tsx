@@ -105,7 +105,7 @@ export default function Stock() {
       {data.rows.length ? (
         <form onSubmit={submit}>
           <div className="card table-wrap">
-            <table className="grid">
+            <table className="data-grid">
               <thead>
                 <tr>
                   <th className="thumb-col"></th>

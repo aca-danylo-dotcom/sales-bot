@@ -128,9 +128,15 @@ async function main() {
       const html = renderToString(wrap(element, path));
       const missing = expects.filter((text) => !html.includes(text));
       const raw = html.includes("<img src=x onerror=");
-      if (missing.length || raw) {
+      const tables = checkTables(html);
+      if (missing.length || raw || tables.length) {
         bad += 1;
-        console.log(`  ✗ ${title}: нет ${missing.join(", ")}${raw ? " | ТЕГ НЕ ЭКРАНИРОВАН" : ""}`);
+        const notes = [
+          missing.length ? `нет ${missing.join(", ")}` : "",
+          raw ? "ТЕГ НЕ ЭКРАНИРОВАН" : "",
+          ...tables,
+        ].filter(Boolean);
+        console.log(`  ✗ ${title}: ${notes.join(" | ")}`);
       } else {
         console.log(`  ✓ ${title} (${html.length} символов)`);
       }
@@ -140,6 +146,27 @@ async function main() {
     }
   }
   console.log(bad ? `ПРОВАЛОВ: ${bad}` : "Все страницы отрисованы.");
+}
+
+/** Столбцы шапки должны сойтись со столбцами данных, иначе подписи стоят не над
+ *  своими числами. Заодно ловим возврат к имени `.grid`: так называется утилита
+ *  Tailwind `display: grid`, и таблица под этим именем перестаёт быть таблицей. */
+function checkTables(html: string): string[] {
+  const problems: string[] = [];
+  // Именно `grid`, а не `data-grid`: словарная граница \b считает дефис концом
+  // слова, и наш собственный класс попадал бы под запрет.
+  if (/<table[^>]*class="[^"]*(?<![\w-])grid(?![\w-])/.test(html)) {
+    problems.push("таблица с классом grid — займёт утилиту Tailwind");
+  }
+  for (const table of html.matchAll(/<table\b[\s\S]*?<\/table>/g)) {
+    const heads = (table[0].match(/<th\b/g) ?? []).length;
+    const first = table[0].match(/<tbody>\s*<tr\b[\s\S]*?<\/tr>/);
+    const cells = (first?.[0].match(/<td\b/g) ?? []).length;
+    if (heads && cells && heads !== cells) {
+      problems.push(`колонок в шапке ${heads}, в строке ${cells}`);
+    }
+  }
+  return problems;
 }
 
 void main();

@@ -30,8 +30,9 @@ import { createPortal } from "react-dom";
     поверх круглой ячейки. */
 const BUTTONS = ".btn, .tab, .tabs a, .chart-tab, .dock-cell";
 
-/** Столько же, сколько у оригинала. Совпадает с длительностью в app.css. */
-const RIPPLE_COLOR = "#add8e6";
+/** Светлый конец палитры панели: круг должен быть виден и на белой кнопке, и
+ *  на фиолетовой ячейке текущего раздела. */
+const RIPPLE_COLOR = "#d9ccff";
 
 type Ripple = {
   key: number;

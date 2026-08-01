@@ -27,7 +27,6 @@ import {
   IconSales,
   IconStock,
 } from "../components/icons";
-import { StatsBackdrop } from "../components/backdrop";
 import { RevenueBars } from "../components/charts/revenue-bars";
 import { FunnelChart } from "../components/charts/funnel-chart";
 import { PieChart } from "../components/charts/pie-chart";
@@ -41,6 +40,35 @@ import {
   LegendValue,
 } from "../components/charts/legend";
 import { usePageTitle } from "../lib/meta";
+
+/* Палитра панели точками: тот же переход, что и в `--accent-gradient`. Здесь
+   она числами, а не строкой CSS, потому что воронке нужен цвет в конкретной
+   точке — растянуть градиент на всю картинку она не умеет, у каждой ступени
+   свой. Держать это в CSS-переменной нельзя: посчитать промежуточный цвет
+   средствами стилей нечем. */
+const PALETTE: [number, [number, number, number]][] = [
+  [0, [82, 39, 255]],
+  [0.55, [180, 151, 207]],
+  [1, [255, 159, 252]],
+];
+
+/** Цвет палитры в точке `at` (0 — начало, 1 — конец). */
+function paletteAt(at: number): string {
+  const point = Math.min(Math.max(at, 0), 1);
+  let from = PALETTE[0];
+  let to = PALETTE[PALETTE.length - 1];
+  for (let index = 0; index < PALETTE.length - 1; index += 1) {
+    if (point >= PALETTE[index][0] && point <= PALETTE[index + 1][0]) {
+      from = PALETTE[index];
+      to = PALETTE[index + 1];
+      break;
+    }
+  }
+  const span = to[0] - from[0];
+  const part = span === 0 ? 0 : (point - from[0]) / span;
+  const channels = from[1].map((value, at) => Math.round(value + (to[1][at] - value) * part));
+  return `rgb(${channels.join(", ")})`;
+}
 
 type Day = {
   day: string;
@@ -174,7 +202,6 @@ export default function Stats() {
 
   return (
     <div className="stats">
-      <StatsBackdrop />
       <Head
         title="Статистика"
         lead={`${data.date_from} — ${data.date_to} · ${data.days} ${
@@ -304,21 +331,28 @@ export default function Stats() {
           прежних шагах.
         </p>
         {funnel.steps[0].value ? (
-          /* Воронка из реестра @bklit, настройки — из их примера: синий цвет
-             панели и три кольца ореола вокруг каждой ступени. Доли она считает
-             сама, от первой ступени, — ровно так же, как сервер, поэтому число
-             под ступенью и `share` из ответа всегда совпадают.
+          /* Воронка из реестра @bklit, настройки — из их примера: три кольца
+             ореола вокруг каждой ступени. Доли она считает сама, от первой
+             ступени, — ровно так же, как сервер, поэтому число под ступенью и
+             `share` из ответа всегда совпадают.
+
+             Градиент задаётся ступеням по кускам: свой переход у каждой
+             растягивается на её ширину, поэтому каждая берёт ровно тот отрезок
+             палитры, который ей достался бы, будь переход одним на всю воронку.
 
              `displayValue` не для красоты: без него воронка печатает «1 200»
              как «1,200», на английский манер. */
           <FunnelChart
             className="funnel"
-            data={funnel.steps.map((step) => ({
+            data={funnel.steps.map((step, index, all) => ({
               label: step.label,
               value: step.value,
               displayValue: step.display,
+              gradient: [
+                { offset: "0%", color: paletteAt(index / all.length) },
+                { offset: "100%", color: paletteAt((index + 1) / all.length) },
+              ],
             }))}
-            color="var(--chart-1)"
             layers={3}
           />
         ) : (
@@ -425,7 +459,7 @@ export default function Stats() {
 
         {products.top.length ? (
           <div className="table-wrap">
-            <table className="grid">
+            <table className="data-grid">
               <thead>
                 <tr>
                   <th>Товар</th>

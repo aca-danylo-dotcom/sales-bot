@@ -278,7 +278,7 @@ export default function ProductCard() {
         <div className="form">
           {product.variants.length ? (
             <div className="table-wrap">
-              <table className="grid">
+              <table className="data-grid">
                 <thead>
                   <tr>
                     <th>Размер</th>

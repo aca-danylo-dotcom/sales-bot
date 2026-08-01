@@ -77,6 +77,19 @@ export function RevenueBars({ data, totals }: Props) {
 
       <ChartContainer className="chart-area aspect-auto h-[250px] w-full" config={config}>
         <BarChart accessibilityLayer data={data} margin={{ left: 12, right: 12 }}>
+          {/* Градиент палитры на весь график, а не на каждый столбик: единицы
+              `userSpaceOnUse` считают проценты от ширины картинки, поэтому
+              переход идёт слева направо через все дни. При заливке по умолчанию
+              (`objectBoundingBox`) каждый столбик получил бы свой полный
+              переход, и вместе они выглядели бы полосатыми. */}
+          <defs>
+            <linearGradient id="bars-accent" gradientUnits="userSpaceOnUse" x1="0%" y1="0" x2="100%" y2="0">
+              <stop offset="0%" stopColor="#5227ff" />
+              <stop offset="55%" stopColor="#b497cf" />
+              <stop offset="100%" stopColor="#ff9ffc" />
+            </linearGradient>
+          </defs>
+
           <CartesianGrid vertical={false} />
 
           {/* minTickGap прореживает даты сам: на широкой карточке подписей
@@ -113,7 +126,10 @@ export function RevenueBars({ data, totals }: Props) {
             }
           />
 
-          <Bar dataKey={active} fill={`var(--color-${active})`} />
+          {/* Без роста из нуля: переключатель «Принято ↔ Заказов» перерисовывает
+              ряд на каждое нажатие, и столбики каждый раз уезжали бы вниз и
+              ползли обратно. Заодно график виден сразу, а не через полсекунды. */}
+          <Bar dataKey={active} fill="url(#bars-accent)" isAnimationActive={false} />
         </BarChart>
       </ChartContainer>
     </div>

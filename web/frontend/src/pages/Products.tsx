@@ -110,7 +110,7 @@ export default function Products() {
       {data.products.length ? (
         <>
           <div className="card table-wrap">
-            <table className="grid">
+            <table className="data-grid">
               <thead>
                 <tr>
                   <th className="thumb-col"></th>

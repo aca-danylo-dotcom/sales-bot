@@ -144,7 +144,7 @@ export default function Orders() {
       {data.orders.length ? (
         <>
           <div className="card table-wrap">
-            <table className="grid">
+            <table className="data-grid">
               <thead>
                 <tr>
                   <th>Заказ</th>

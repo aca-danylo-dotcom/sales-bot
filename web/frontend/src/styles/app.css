@@ -22,26 +22,38 @@
   --line: #e8e8ed;
   --text: #1d1d1f;
   --muted: #86868b;
-  --accent: #0071e3;
-  --accent-soft: #e8f1fd;
+  --accent: #5227ff;
+  --accent-soft: #efeaff;
+  /* Тёмный конец палитры — для текста на светлой подложке: сам акцент на
+     `--accent-soft` даёт всего 4.9:1, а надписи в плашках мелкие. */
+  --accent-deep: #3a12c4;
+  /* Градиент палитры целиком — для картинок: столбиков, воронки, круга. Текста
+     на них нет, поэтому светлый розовый конец ничему не мешает. */
+  --accent-gradient: linear-gradient(90deg, #5227ff 0%, #b497cf 55%, #ff9ffc 100%);
+  /* Тот же переход, обрезанный там, где белая надпись ещё читается: на #b497cf
+     контраст падает до 2.5:1, на #ff9ffc — до 1.8:1, это уже нечитаемо.
+     Поэтому кнопки и текущий раздел меню берут короткий вариант. */
+  --accent-gradient-solid: linear-gradient(90deg, #5227ff 0%, #7b5cf0 100%);
   --danger: #d70015;
   --ok: #1d9d5c;
   --radius: 18px;
-  /* Цвета графиков. Восемь оттенков, потому что в топе товаров восемь долей;
-     первый — синий панели, дальше соседние по кругу цвета разводятся так,
-     чтобы рядом стоящие доли не сливались. Ссылки в разделе при этом сделаны
-     чёрными: цветным остаётся картинка, а не текст. */
+  /* Цвета графиков. Восемь оттенков, потому что в топе товаров восемь долей.
+     Первые пять — сама палитра панели от фиолетового к розовому: так круг
+     читается как одна вещь, а не как набор случайных цветов. Последние три
+     уведены в сторону намеренно — восемь оттенков одного тона рядом уже не
+     различить, а доли надо отличать друг от друга, а не любоваться ими.
+     Ссылки в разделе при этом сделаны чёрными: цветным остаётся картинка. */
   --legend: var(--card);
   --legend-foreground: var(--text);
   --legend-muted: #f5f5f7;
   --legend-muted-foreground: var(--muted);
   --legend-track: var(--line);
-  --chart-1: #0071e3;
-  --chart-2: #34a2e8;
-  --chart-3: #5e5ce6;
-  --chart-4: #1d9d5c;
-  --chart-5: #f5a623;
-  --chart-6: #d95dbd;
+  --chart-1: #5227ff;
+  --chart-2: #7b5cf0;
+  --chart-3: #a175e6;
+  --chart-4: #b497cf;
+  --chart-5: #ff9ffc;
+  --chart-6: #f5a623;
   --chart-7: #00a9a5;
   --chart-8: #ff6b4a;
   --chart-background: var(--card);
@@ -202,12 +214,12 @@ a:hover { text-decoration: underline; }
 }
 .dock-item:hover .dock-cell { color: var(--text); }
 
-/* Текущий раздел — синим. По меню в панели понимают, где находятся, и метка
+/* Текущий раздел — цветом панели. По меню понимают, где находятся, и метка
    должна читаться, даже когда курсора на экране нет вовсе. */
 .dock-cell[data-active="true"] {
-  background: var(--accent);
+  background: var(--accent-gradient-solid);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.35);
+  box-shadow: 0 2px 8px rgba(82, 39, 255, 0.35);
 }
 .dock-item:hover .dock-cell[data-active="true"] { color: #fff; }
 
@@ -388,7 +400,7 @@ h2 {
   border-radius: 14px;
   font-size: 14px;
 }
-.flash.ok { background: var(--accent-soft); color: #0058b0; }
+.flash.ok { background: var(--accent-soft); color: var(--accent-deep); }
 .flash.warn { background: #fff6e8; color: #8a5a00; }
 .flash.err { background: #fff4f4; color: var(--danger); }
 
@@ -476,8 +488,11 @@ h2 {
 }
 .btn:hover { background: #dcdce1; text-decoration: none; }
 
-.btn.primary { background: var(--accent); color: #fff; }
-.btn.primary:hover { background: #0077ed; }
+.btn.primary { background: var(--accent-gradient-solid); color: #fff; }
+/* Наведение не подменяет цвет, а высветляет плашку целиком: подобрать вторую
+   пару концов градиента так, чтобы переход остался ровным, труднее, чем поднять
+   яркость. */
+.btn.primary:hover { background: var(--accent-gradient-solid); filter: brightness(1.12); }
 
 .btn.ghost { background: transparent; color: var(--accent); padding: 7px 12px; }
 .btn.ghost:hover { background: var(--accent-soft); }
@@ -487,12 +502,12 @@ h2 {
 
 .btn.small { font-size: 13px; padding: 5px 11px; }
 
-/* Цвет круга, разбегающегося при нажатии (см. components/ripple.tsx). Голубой
-   из присланного примера идёт всем, кроме двух случаев: на синей кнопке он
-   пропал бы в фоне, а на кнопке удаления голубая вспышка спорит с красной
-   надписью. */
-.btn { --ripple: #add8e6; }
-.btn.primary { --ripple: #d6ecff; }
+/* Цвет круга, разбегающегося при нажатии (см. components/ripple.tsx). Светлый
+   сиреневый идёт всем, кроме двух случаев: на фиолетовой кнопке он пропал бы в
+   фоне и взят ещё светлее, а на кнопке удаления сиреневая вспышка спорила бы с
+   красной надписью. */
+.btn { --ripple: #d9ccff; }
+.btn.primary { --ripple: #e6dcff; }
 .btn.danger-btn { --ripple: #ffcdc9; }
 
 /* Кнопка, пока запрос в пути. Раньше повторную отправку ловил app.js: страница
@@ -500,7 +515,7 @@ h2 {
    её гасит сам React по состоянию запроса, но вид «занята» нужен прежний. */
 .btn:disabled { opacity: 0.55; cursor: default; }
 .btn:disabled:hover { background: #e8e8ed; }
-.btn.primary:disabled:hover { background: var(--accent); }
+.btn.primary:disabled:hover { background: var(--accent-gradient-solid); filter: none; }
 
 /* ─── Формы ─── */
 
@@ -727,11 +742,15 @@ input[type="file"]:hover { border-color: #d6d6dc; }
 
 /* ─── Таблицы ─── */
 
+/* Не `.grid`: у Tailwind так называется утилита `display: grid`, и таблица
+   переставала быть таблицей — колонки сбивались в левый угол, а подписи
+   оказывались не над своими числами. Наши правила перебивали ширину и шрифт,
+   но `display` объявлял только Tailwind, перебивать было нечего. */
 .table-wrap { overflow-x: auto; padding: 8px 10px; }
 
-.grid { width: 100%; border-collapse: collapse; font-size: 14px; }
+.data-grid { width: 100%; border-collapse: collapse; font-size: 14px; }
 
-.grid th {
+.data-grid th {
   padding: 10px 14px;
   text-align: left;
   font-weight: 500;
@@ -742,20 +761,20 @@ input[type="file"]:hover { border-color: #d6d6dc; }
   border-bottom: 1px solid var(--line);
 }
 
-.grid td {
+.data-grid td {
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   vertical-align: middle;
 }
-.grid tbody tr:last-child td { border-bottom: none; }
-.grid tbody tr:hover { background: #fafafc; }
+.data-grid tbody tr:last-child td { border-bottom: none; }
+.data-grid tbody tr:hover { background: #fafafc; }
 
-.grid .num { text-align: right; white-space: nowrap; }
+.data-grid .num { text-align: right; white-space: nowrap; }
 /* Явно и для шапки: без этого «ШТУК» и «ВЫРУЧКА» прижимаются к левому краю
    своей колонки, а числа под ними стоят у правого — подпись оказывается не над
    данными, а где-то сбоку. */
-.grid th.num { text-align: right; }
-.grid td .small { display: block; }
+.data-grid th.num { text-align: right; }
+.data-grid td .small { display: block; }
 
 .thumb-col { width: 60px; }
 .thumb {
@@ -794,7 +813,7 @@ input.stock.zero { color: var(--danger); }
 .tag.st-new,
 .tag.st-awaiting_payment { background: #fdf3e3; color: #8a6100; }
 .tag.st-paid_claimed     { background: #ffe9e5; color: #c0392b; }
-.tag.st-confirmed        { background: var(--accent-soft); color: #0058b0; }
+.tag.st-confirmed        { background: var(--accent-soft); color: var(--accent-deep); }
 .tag.st-shipped          { background: #ece9fd; color: #4c3fbe; }
 .tag.st-done             { background: #e6f6ed; color: var(--ok); }
 .tag.st-cancelled        { background: #f0f0f3; color: var(--muted); }
@@ -833,7 +852,7 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 .tab.active .count { color: rgba(255, 255, 255, 0.7); }
 
 /* Вкладки — те же кнопки, только фильтруют список. Отзываются так же. */
-.tab, .tabs a { --ripple: #add8e6; }
+.tab, .tabs a { --ripple: #d9ccff; }
 
 /* ─── Карточка заказа ─── */
 
@@ -1047,58 +1066,6 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
    широкая колонка им только вредит. */
 .page:has(.stats) { max-width: 1280px; }
 
-/* Фон раздела. Свет и лучи — градиенты, пакет — рисунок, см. backdrop.tsx.
-   Слой лежит под содержимым страницы и не перехватывает мышь. */
-.stats-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  overflow: hidden;
-  pointer-events: none;
-  background:
-    radial-gradient(88% 68% at 86% -12%, #e8ecfa 0%, rgba(232, 236, 250, 0) 62%),
-    linear-gradient(180deg, #f6f7fd 0%, #fcfcff 48%, #ffffff 100%);
-}
-
-/* Косые лучи из угла. Маска гасит их к середине экрана — это отсвет, а не
-   полосатая бумага, поэтому за пределами угла их быть не должно. */
-.stats-backdrop::before {
-  content: "";
-  position: absolute;
-  inset: -25% -12% auto -12%;
-  height: 95%;
-  background: repeating-linear-gradient(
-    102deg,
-    rgba(255, 255, 255, 0) 0 56px,
-    rgba(255, 255, 255, 0.6) 56px 68px
-  );
-  -webkit-mask-image: radial-gradient(62% 74% at 80% 16%, #000 0%, transparent 72%);
-  mask-image: radial-gradient(62% 74% at 80% 16%, #000 0%, transparent 72%);
-  opacity: 0.55;
-}
-
-/* Пакет стоит за карточкой «Клиенты» и выглядывает из-под неё сверху и справа.
-   Отрицательный z-index кладёт его под содержимое страницы: карточки
-   непрозрачные, поэтому видно ровно то, что торчит за их краями. */
-.stats-bag {
-  position: absolute;
-  z-index: -1;
-  top: 24px;
-  width: 470px;
-  /* Вылезает за колонку ровно настолько, сколько свободного поля до края
-     экрана, и не больше 76 пикселей. Без ограничения на узком окне появилась
-     бы горизонтальная прокрутка; из поля вычтен запас, потому что 100vw
-     считает вместе с полосой прокрутки, а 100% — без неё. */
-  right: calc(-1 * max(0px, min(76px, (100vw - 100%) / 2 - 20px)));
-  filter: drop-shadow(0 40px 60px rgba(88, 100, 165, 0.16));
-}
-
-/* Ниже тысячи мозаика становится колонкой во всю ширину: пакету негде
-   выглядывать — он целиком уходит под карточки, и остаётся только тень. */
-@media (max-width: 1100px) {
-  .stats-bag { display: none; }
-}
-
 .stats .card {
   border-radius: 20px;
   box-shadow: var(--stats-shadow);
@@ -1200,7 +1167,7 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   flex: none;
   padding: 6px;
   border-radius: 10px;
-  background: #e9f1fe;
+  background: #f0ebfe;
 }
 
 .span-4 { grid-column: span 4; }

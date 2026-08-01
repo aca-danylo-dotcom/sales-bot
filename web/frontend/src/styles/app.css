@@ -821,9 +821,96 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 
 /* ─── Статистика ─── */
 
+/* Раздел оформлен по макету владельца и отличается от остальной панели: белые
+   карточки лежат не на ровном сером поле, а на светлом фоне с подсветкой из
+   правого верхнего угла, и потому им нужна тень — без неё они растворяются.
+   Всё это заперто внутри `.stats`: «Заказы» и «Товары» остаются как были. */
+.stats {
+  --stats-shadow: 0 1px 2px rgba(20, 26, 60, 0.05), 0 10px 26px rgba(20, 26, 60, 0.06);
+}
+
+/* Фон раздела. Свет и лучи — градиенты, пакет — рисунок, см. backdrop.tsx.
+   Слой лежит под содержимым страницы и не перехватывает мышь. */
+.stats-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(88% 68% at 86% -12%, #e8ecfa 0%, rgba(232, 236, 250, 0) 62%),
+    linear-gradient(180deg, #f6f7fd 0%, #fcfcff 48%, #ffffff 100%);
+}
+
+/* Косые лучи из угла. Маска гасит их к середине экрана — это отсвет, а не
+   полосатая бумага, поэтому за пределами угла их быть не должно. */
+.stats-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: -25% -12% auto -12%;
+  height: 95%;
+  background: repeating-linear-gradient(
+    102deg,
+    rgba(255, 255, 255, 0) 0 56px,
+    rgba(255, 255, 255, 0.6) 56px 68px
+  );
+  -webkit-mask-image: radial-gradient(62% 74% at 80% 16%, #000 0%, transparent 72%);
+  mask-image: radial-gradient(62% 74% at 80% 16%, #000 0%, transparent 72%);
+  opacity: 0.55;
+}
+
+.stats-bag {
+  position: absolute;
+  top: -26px;
+  right: -50px;
+  width: 360px;
+  filter: drop-shadow(0 38px 56px rgba(88, 100, 165, 0.14));
+}
+
+/* Свободного поля справа хватает только на широком экране. На узком пакет
+   уехал бы под карточки — там он не украшение, а мусор под текстом. */
+@media (max-width: 1280px) {
+  .stats-bag { display: none; }
+}
+
+.stats .card {
+  border-radius: 20px;
+  box-shadow: var(--stats-shadow);
+}
+
+/* Строка периода — не карточка, а несколько отдельных белых плашек с зазорами:
+   переключатель, два поля с датами и кнопка. Так на макете, и так честнее —
+   это разные органы управления, а не один блок. */
+.stats .filters {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  gap: 10px;
+}
+
+.stats .filters input[type="date"] {
+  border-color: transparent;
+  box-shadow: var(--stats-shadow);
+}
+
+.stats .filters .btn[type="submit"] {
+  background: var(--card);
+  box-shadow: var(--stats-shadow);
+}
+.stats .filters .btn[type="submit"]:hover { background: #f7f8fc; }
+
 /* Выбор периода стоит перед цифрами, потому что от него зависят все они.
-   Нажатый отрезок помечен так же, как активная вкладка товаров. */
-.period-presets { display: flex; gap: 6px; }
+   Три отрезка живут в одной белой пилюле, нажатый помечен чёрным — так же,
+   как активная вкладка товаров. */
+.period-presets { display: flex; gap: 4px; }
+.stats .period-presets {
+  padding: 5px;
+  border-radius: 980px;
+  background: var(--card);
+  box-shadow: var(--stats-shadow);
+}
+.stats .period-presets .btn { background: transparent; }
+.stats .period-presets .btn:hover { background: #f0f0f5; }
 .period-presets .btn.on {
   background: var(--text);
   color: #fff;
@@ -878,7 +965,17 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   align-items: center;
   gap: 9px;
 }
-.sec-icon { width: 22px; height: 22px; flex: none; }
+/* Значок сидит в светло-голубой плитке — так на макете. Плитка заодно держит
+   строку заголовка ровной: у значков разная плотность, и без общей подложки
+   один блок казался бы сдвинутым относительно другого. */
+.sec-icon {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  padding: 6px;
+  border-radius: 10px;
+  background: #e9f1fe;
+}
 
 .span-4 { grid-column: span 4; }
 .span-5 { grid-column: span 5; }
@@ -897,6 +994,10 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 }
 .stat-row.tight { margin-bottom: 4px; }
 
+/* В узкой карточке плашки идут одна под другой. Втиснутые в два столбца по
+   130 пикселей, они режут подписи вроде «Разговор → заказ» пополам. */
+.stats-grid .span-4 .stat-row { grid-template-columns: minmax(0, 1fr); }
+
 .stat {
   display: flex;
   flex-direction: column;
@@ -908,12 +1009,65 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 }
 a.stat:hover { background: #ececf0; text-decoration: none; }
 
+/* В «Статистике» плашки белые с тонкой рамкой: карточка под ними тоже белая,
+   и серая заливка на светлом фоне раздела выглядела бы грязным пятном. */
+.stats .stat {
+  background: var(--card);
+  border: 1px solid #edeef4;
+  border-radius: 14px;
+}
+.stats a.stat:hover { background: #fafbff; border-color: #dde1ee; }
+
 .stat-title { font-size: 12px; color: var(--muted); }
 .stat-value { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
 .stat-sub { font-size: 12px; color: var(--muted); }
 
-/* Графику нужна ширина карточки целиком: столбики за месяц иначе слипаются. */
-.chart { margin-top: 8px; }
+/* ─── График выручки ─── */
+
+/* Высота задана здесь, а не в компоненте: ParentSize меряет родителя, и без
+   высоты у него нечего мерить. 204 = поле графика плюс строка с датами. */
+.chart-area {
+  position: relative;
+  height: 204px;
+  margin: 6px 0 2px;
+}
+
+/* Линии-опоры: пунктир едва заметен. Считать по ним никто не будет — суммы
+   даёт подсказка, а сплошные линии спорили бы с самой кривой. */
+.area-grid { stroke: #eef0f6; stroke-dasharray: 3 6; }
+
+.area-line {
+  fill: none;
+  stroke: var(--chart-1);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Точка в белом кольце: на заливке того же цвета без кольца она пропадает. */
+.area-dot { fill: var(--chart-1); stroke: #fff; stroke-width: 3; }
+
+.area-cursor { stroke: #ccd4e6; stroke-width: 1; stroke-dasharray: 4 4; }
+
+.area-label { fill: var(--muted); font-size: 12px; text-anchor: middle; }
+
+.area-tip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background: var(--chart-tooltip-background);
+  color: var(--chart-tooltip-foreground);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.area-tip-day { color: var(--chart-tooltip-muted); }
+.area-tip-value { font-weight: 600; font-size: 13px; }
 
 /* Воронка: пять цветных плашек с зазорами, высота — по числу заказов.
 

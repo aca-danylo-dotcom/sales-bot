@@ -32,13 +32,25 @@ function Frame({ children, className }: { children: React.ReactNode; className?:
   );
 }
 
-/** Продажи — столбики, растущие слева направо. */
+/** Продажи — ломаная, идущая вверх: тот же ход, что и на графике под ней. */
 export function IconSales({ className }: Props) {
   return (
     <Frame className={className}>
-      <rect x="4" y="18" width="6" height="10" rx="2.5" fill={LIGHT} />
-      <rect x="13" y="12" width="6" height="16" rx="2.5" fill={DARK} opacity="0.75" />
-      <rect x="22" y="5" width="6" height="23" rx="2.5" fill={DARK} />
+      <path
+        d="M4 22l7-7 5 5 5-7 7 7"
+        stroke={LIGHT}
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.9"
+      />
+      <path
+        d="M4 26l7-7 5 5 5-7 7 7"
+        stroke={DARK}
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </Frame>
   );
 }
@@ -68,17 +80,12 @@ export function IconDelivery({ className }: Props) {
   );
 }
 
-/** Отмены — перечёркнутый круг. */
+/** Отмены — круг с чертой: знак «нельзя», как на макете. */
 export function IconCancelled({ className }: Props) {
   return (
     <Frame className={className}>
-      <circle cx="16" cy="16" r="12" fill={LIGHT} />
-      <path
-        d="M11.5 11.5l9 9M20.5 11.5l-9 9"
-        stroke={DARK}
-        strokeWidth="2.6"
-        strokeLinecap="round"
-      />
+      <circle cx="16" cy="16" r="11.5" stroke={DARK} strokeWidth="2.4" fill={LIGHT} />
+      <path d="M10.5 16h11" stroke={DARK} strokeWidth="2.4" strokeLinecap="round" />
     </Frame>
   );
 }

@@ -892,10 +892,15 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 .chart { margin-top: 8px; }
 
 /* Воронка: пять цветных плашек с зазорами, высота — по числу заказов.
-   Ступени выровнены по верхнему краю, поэтому убывание видно как ступеньки. */
+
+   Стоят на общей нижней линии, как столбики: так видно, что ступень ниже
+   предыдущей, а не просто висит выше или ниже неё. Содержимое тоже прижато к
+   низу, поэтому числа, проценты и подписи всех ступеней оказываются на одном
+   уровне — разной остаётся только цветная часть сверху. Без этого блоки
+   выглядят разложенными кое-как. */
 .funnel-steps {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 8px;
   margin: 16px 0 18px;
 }
@@ -906,13 +911,35 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 12px 8px;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 12px 8px 14px;
   border-radius: 14px;
   color: #fff;
   text-align: center;
   overflow: hidden;
+
+  /* Наведение: ступень приподнимается и чуть растёт, соседние гаснут — так
+     взгляд сам сходится на выбранной. Кривая с длинным выходом (0.22, 1) даёт
+     мягкую остановку вместо рывка в конце. */
+  transition:
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease;
+}
+
+.funnel-steps:hover .funnel-step { opacity: 0.62; }
+
+.funnel-step:hover {
+  opacity: 1;
+  transform: translateY(-6px) scale(1.03);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
+}
+
+/* Кому движение мешает — тому только подсветка, без прыжка. */
+@media (prefers-reduced-motion: reduce) {
+  .funnel-step { transition: opacity 0.2s ease; }
+  .funnel-step:hover { transform: none; box-shadow: none; }
 }
 
 /* Последняя ступень светлая — на ней белый текст пропадает. */
@@ -930,10 +957,16 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 }
 .funnel-step.on-light .funnel-share { background: rgba(0, 0, 0, 0.08); }
 
+/* Две строки под подпись всегда: «Оплата подтверждена» переносится, остальные
+   нет, и без запаса соседние плашки разъезжались бы по высоте текста. */
 .funnel-label {
   font-size: 11px;
   line-height: 1.25;
   opacity: 0.92;
+  min-height: 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
 }
 
 .funnel { width: 100%; }

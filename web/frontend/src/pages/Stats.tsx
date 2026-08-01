@@ -29,6 +29,7 @@ import {
 } from "../components/icons";
 import { StatsBackdrop } from "../components/backdrop";
 import { RevenueBars } from "../components/charts/revenue-bars";
+import { FunnelChart } from "../components/charts/funnel-chart";
 import { PieChart } from "../components/charts/pie-chart";
 import { PieSlice } from "../components/charts/pie-slice";
 import { PieCenter } from "../components/charts/pie-center";
@@ -111,58 +112,6 @@ type Stats = {
     zero_stock: number;
   };
 };
-
-/**
- * Цвета ступеней воронки — переход от синего к зелёному.
- *
- * Не случайный набор: синий у нас значит «начало разговора», зелёный —
- * «получилось» (им же помечен статус «выполнен» в списке заказов). Поэтому
- * ступени и идут от одного к другому — движение к успеху видно даже до того,
- * как человек прочитает подписи.
- */
-const FUNNEL_COLORS = ["#0071e3", "#2b9ae8", "#00b3ad", "#34c759", "#c8f0d6"];
-
-/** На светлой последней ступени белые цифры не читаются. */
-const FUNNEL_DARK_TEXT = [false, false, false, false, true];
-
-/**
- * Воронка: пять плашек, высота — по числу заказов.
- *
- * Своя вёрстка вместо готового компонента: владелец нарисовал ровно такие
- * прямоугольники с зазорами, а библиотечная воронка рисует слитную фигуру с
- * плавными переходами. Здесь пять div-ов, и совпадение с макетом точное.
- *
- * Высота не пропорциональна значению целиком: у ступени есть минимум, иначе
- * «1 заказ из 40» превращается в полоску, в которую не влезает даже цифра.
- */
-function Funnel({
-  steps,
-}: {
-  steps: { label: string; value: number; share: number; display: string }[];
-}) {
-  const max = Math.max(...steps.map((step) => step.value), 1);
-  const MIN_HEIGHT = 66;
-  const MAX_HEIGHT = 132;
-
-  return (
-    <div className="funnel-steps">
-      {steps.map((step, index) => (
-        <div
-          key={step.label}
-          className={`funnel-step ${FUNNEL_DARK_TEXT[index] ? "on-light" : ""}`}
-          style={{
-            background: FUNNEL_COLORS[index] ?? FUNNEL_COLORS.at(-1),
-            height: MIN_HEIGHT + (step.value / max) * (MAX_HEIGHT - MIN_HEIGHT),
-          }}
-        >
-          <span className="funnel-value">{step.display}</span>
-          <span className="funnel-share">{step.share}%</span>
-          <span className="funnel-label">{step.label}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /** Готовые отрезки: ими меряют торговлю чаще всего. */
 const PRESETS = [
@@ -355,7 +304,23 @@ export default function Stats() {
           прежних шагах.
         </p>
         {funnel.steps[0].value ? (
-          <Funnel steps={funnel.steps} />
+          /* Воронка из реестра @bklit, настройки — из их примера: синий цвет
+             панели и три кольца ореола вокруг каждой ступени. Доли она считает
+             сама, от первой ступени, — ровно так же, как сервер, поэтому число
+             под ступенью и `share` из ответа всегда совпадают.
+
+             `displayValue` не для красоты: без него воронка печатает «1 200»
+             как «1,200», на английский манер. */
+          <FunnelChart
+            className="funnel"
+            data={funnel.steps.map((step) => ({
+              label: step.label,
+              value: step.value,
+              displayValue: step.display,
+            }))}
+            color="var(--chart-1)"
+            layers={3}
+          />
         ) : (
           <p className="muted">Заказов за период нет — рисовать нечего.</p>
         )}

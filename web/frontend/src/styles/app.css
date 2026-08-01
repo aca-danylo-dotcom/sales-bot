@@ -1325,80 +1325,10 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
    воздух: вплотную к рамке карточки столбики выглядят зажатыми. */
 .chart-area { padding: 14px 8px 6px; }
 
-/* Воронка: пять цветных плашек с зазорами, высота — по числу заказов.
-
-   Плашки центрированы по общей средней линии: короткие ступени укорачиваются
-   с обеих сторон сразу, и ряд читается как сужающаяся воронка, а не как
-   лесенка, приклеенная к верхнему краю. Содержимое внутри тоже по центру. */
-.funnel-steps {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 16px 0 18px;
-}
-
-.funnel-step {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 12px 8px;
-  border-radius: 14px;
-  color: #fff;
-  text-align: center;
-  overflow: hidden;
-
-  /* Наведение: ступень приподнимается и чуть растёт. Соседние остаются как
-     были — приглушать их пробовали, и оказалось, что мигающий фон отвлекает
-     сильнее, чем помогает. Кривая с длинным выходом (0.22, 1) даёт мягкую
-     остановку вместо рывка в конце. */
-  transition:
-    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.32s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.funnel-step:hover {
-  transform: translateY(-6px) scale(1.03);
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
-}
-
-/* Кому движение мешает — тому только тень, без прыжка. */
-@media (prefers-reduced-motion: reduce) {
-  .funnel-step { transition: box-shadow 0.2s ease; }
-  .funnel-step:hover { transform: none; }
-}
-
-/* Последняя ступень светлая — на ней белый текст пропадает. */
-.funnel-step.on-light { color: var(--text); }
-
-.funnel-value { font-size: 24px; font-weight: 600; line-height: 1; }
-
-/* Процент — пилюлей поверх цвета: он вторичен и не должен спорить с числом. */
-.funnel-share {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 980px;
-  background: rgba(255, 255, 255, 0.28);
-}
-.funnel-step.on-light .funnel-share { background: rgba(0, 0, 0, 0.08); }
-
-/* Две строки под подпись всегда: «Оплата подтверждена» переносится, остальные
-   нет, и без запаса соседние плашки разъезжались бы по высоте текста. */
-.funnel-label {
-  font-size: 11px;
-  line-height: 1.25;
-  opacity: 0.92;
-  min-height: 28px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-}
-
-.funnel { width: 100%; }
+/* Воронку рисует компонент из реестра @bklit — вид и движение целиком его,
+   как в их примере. Здесь только воздух вокруг: сверху она стоит под
+   пояснением, снизу под ней идут цифры доставки. */
+.funnel { width: 100%; margin: 6px 0 4px; }
 
 /* Круг и легенда рядом, пока хватает ширины. */
 .pie-row {

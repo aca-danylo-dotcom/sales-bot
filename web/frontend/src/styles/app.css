@@ -816,28 +816,34 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 .photo-add { cursor: pointer; }
 .photo-add:hover { border-color: #c9cad0; }
 
-/* Утилиты, которые компоненты реестра ждут от своей темы, а у нас их нет:
-   полоса прокрутки у ряда плиток и растворение его краёв. Без них ряд
-   работает, но выглядит обрезанным. */
+/* Крестик «убрать снимок» — белый кружок поверх фото. Своим цветом он тонул:
+   значок наследует цвет текста, а фотографии тёмные, и на чёрной куртке его
+   было не видно вовсе. Кружок читается на любом снимке, поэтому кнопка
+   осталась на месте — прятать её за пределы плитки не пришлось. */
+.photo-picker [data-slot="attachment-actions"] {
+  top: 7px;
+  right: 7px;
+}
+.photo-picker [data-slot="attachment-action"] {
+  width: 24px;
+  height: 24px;
+  border-radius: 980px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(6px);
+}
+.photo-picker [data-slot="attachment-action"]:hover {
+  background: #fff;
+  color: var(--danger);
+}
+
+/* Полоса прокрутки у ряда плиток: компонент ждёт эту утилиту от своей темы.
+   Растворения краёв (`scroll-fade-x`) здесь намеренно нет — оно съедало
+   рамку крайних плиток, а ряд у нас короткий и в прокрутке не нуждается. */
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
-
-.scroll-fade-x {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 10px,
-    #000 calc(100% - 10px),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 10px,
-    #000 calc(100% - 10px),
-    transparent 100%
-  );
-}
 
 /* ─── Действия над товаром целиком ─── */
 

@@ -1132,10 +1132,80 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 
 /* ─── График выручки ─── */
 
-/* Размер и вид задаёт сама обвязка Chart — как в демо реестра. Здесь только
-   воздух вокруг: график стоит под цифрами продаж, и без отступа линия
-   прилипает к нижней из них. */
-.chart-area { margin: 10px 0 2px; }
+/* Карточка графика — как в демо «Bar Chart · Interactive» реестра: шапка с
+   названием слева и переключателями справа, под ней столбики. Тёмный фон из
+   их примера не берём, панель светлая ([[light-theme-only]]); всё остальное —
+   раскладка, границы, крупные числа — оттуда. */
+.chart-card {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.chart-head {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--line);
+}
+
+.chart-head-title {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 16px 20px;
+}
+.chart-head-name { font-weight: 600; font-size: 15px; }
+.chart-head-note { font-size: 13px; color: var(--muted); }
+
+.chart-tabs { display: flex; }
+
+/* Кнопка-переключатель: подпись мелким и число крупным, как у них. Своей
+   рамки нет — её роль играют линии между ячейками шапки. */
+.chart-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 20px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.chart-tab + .chart-tab { border-left: 1px solid var(--line); }
+.chart-tab:hover { background: #fafafc; }
+.chart-tab[data-active="true"] { background: #f5f5f7; }
+.chart-tab-title { font-size: 12px; color: var(--muted); }
+.chart-tab-value {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+/* На широком экране переключатели встают справа от названия, а разделяет их
+   вертикальная линия — на узком они уезжают под название, и линия становится
+   горизонтальной. Это поведение их демо. */
+@media (min-width: 640px) {
+  .chart-head { flex-direction: row; }
+  .chart-tab {
+    border-top: 0;
+    border-left: 1px solid var(--line);
+    padding: 14px 26px;
+  }
+}
+
+/* Размер поля графика задаёт сама обвязка Chart — как в демо. Здесь только
+   воздух: вплотную к рамке карточки столбики выглядят зажатыми. */
+.chart-area { padding: 14px 8px 6px; }
 
 /* Воронка: пять цветных плашек с зазорами, высота — по числу заказов.
 

@@ -28,7 +28,7 @@ import {
   IconStock,
 } from "../components/icons";
 import { StatsBackdrop } from "../components/backdrop";
-import { RevenueArea } from "../components/charts/revenue-area";
+import { RevenueBars } from "../components/charts/revenue-bars";
 import { PieChart } from "../components/charts/pie-chart";
 import { PieSlice } from "../components/charts/pie-slice";
 import { PieCenter } from "../components/charts/pie-center";
@@ -306,7 +306,10 @@ export default function Stats() {
         </div>
 
         {sales.placed || sales.cancelled ? (
-          <RevenueArea data={data.by_day} />
+          <RevenueBars
+            data={data.by_day}
+            totals={{ revenue_text: sales.paid_revenue_text, orders: sales.placed }}
+          />
         ) : (
           <p className="muted">За этот период заказов не было.</p>
         )}

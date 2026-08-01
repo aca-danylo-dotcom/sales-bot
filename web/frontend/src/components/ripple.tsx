@@ -22,8 +22,9 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
-/** Всё, что в панели выглядит и работает как кнопка: пилюли и вкладки. */
-const BUTTONS = ".btn, .tab, .tabs a";
+/** Всё, что в панели выглядит и работает как кнопка: пилюли, вкладки и
+    переключатели рядов в шапке графика. */
+const BUTTONS = ".btn, .tab, .tabs a, .chart-tab";
 
 /** Столько же, сколько у оригинала. Совпадает с длительностью в app.css. */
 const RIPPLE_COLOR = "#add8e6";

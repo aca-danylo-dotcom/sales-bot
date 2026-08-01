@@ -846,7 +846,15 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   padding: 20px 22px;
   height: 100%;
 }
-.stats-grid .card h2 { font-size: 17px; }
+/* Значок у заголовка — только чтобы блок находился глазами, поэтому он мелкий
+   и не спорит с текстом. По одному на карточку и больше нигде. */
+.stats-grid .card h2 {
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.sec-icon { width: 22px; height: 22px; flex: none; }
 
 .span-4 { grid-column: span 4; }
 .span-5 { grid-column: span 5; }
@@ -883,25 +891,49 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 /* Графику нужна ширина карточки целиком: столбики за месяц иначе слипаются. */
 .chart { margin-top: 8px; }
 
-/* Воронка — на чёрной подложке: так её видел владелец в макете, и цветные
-   ступени на чёрном действительно звонче, чем на белом.
+/* Воронка: пять цветных плашек с зазорами, высота — по числу заказов.
+   Ступени выровнены по верхнему краю, поэтому убывание видно как ступеньки. */
+.funnel-steps {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 16px 0 18px;
+}
 
-   Переменные перекрыты на месте, поэтому компонент сам рисует как надо: белые
-   значения сверху, белые подписи снизу, а пилюля с процентом получается белой
-   с чёрной цифрой — её цвета берутся из foreground/background наоборот.
-   Разделители между ступенями — тоже чёрные, они прорезают цвет полосами. */
-.funnel-panel {
-  margin: 14px 0 18px;
-  padding: 20px 14px 12px;
+.funnel-step {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 8px;
   border-radius: 14px;
-  background: #0b0b0c;
+  color: #fff;
+  text-align: center;
+  overflow: hidden;
+}
 
-  --color-foreground: #ffffff;
-  --color-background: #0b0b0c;
-  --color-muted-foreground: #f5f5f7;
-  --color-muted: #0b0b0c;
-  --chart-grid: #0b0b0c;
-  --chart-label: #f5f5f7;
+/* Последняя ступень светлая — на ней белый текст пропадает. */
+.funnel-step.on-light { color: var(--text); }
+
+.funnel-value { font-size: 24px; font-weight: 600; line-height: 1; }
+
+/* Процент — пилюлей поверх цвета: он вторичен и не должен спорить с числом. */
+.funnel-share {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 980px;
+  background: rgba(255, 255, 255, 0.28);
+}
+.funnel-step.on-light .funnel-share { background: rgba(0, 0, 0, 0.08); }
+
+.funnel-label {
+  font-size: 11px;
+  line-height: 1.25;
+  opacity: 0.92;
 }
 
 .funnel { width: 100%; }

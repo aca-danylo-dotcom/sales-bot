@@ -19,12 +19,19 @@ import { Link, useSearchParams } from "react-router-dom";
 import { get, query as buildQuery } from "../api/client";
 import { Head, Loading, LoadError, stamp } from "../components/ui";
 import { NumberTicker } from "../components/number-ticker";
+import {
+  IconBasket,
+  IconCancelled,
+  IconClients,
+  IconDelivery,
+  IconSales,
+  IconStock,
+} from "../components/icons";
 import { BarChart } from "../components/charts/bar-chart";
 import { Bar } from "../components/charts/bar";
 import { BarXAxis } from "../components/charts/bar-x-axis";
 import { Grid } from "../components/charts/grid";
 import { ChartTooltip } from "../components/charts/tooltip";
-import { FunnelChart } from "../components/charts/funnel-chart";
 import { PieChart } from "../components/charts/pie-chart";
 import { PieSlice } from "../components/charts/pie-slice";
 import { PieCenter } from "../components/charts/pie-center";
@@ -116,7 +123,49 @@ type Stats = {
  * ступени и идут от одного к другому — движение к успеху видно даже до того,
  * как человек прочитает подписи.
  */
-const FUNNEL_COLORS = ["#0071e3", "#2b8fe6", "#00a9a5", "#17a866", "#1d9d5c"];
+const FUNNEL_COLORS = ["#0071e3", "#2b9ae8", "#00b3ad", "#34c759", "#c8f0d6"];
+
+/** На светлой последней ступени белые цифры не читаются. */
+const FUNNEL_DARK_TEXT = [false, false, false, false, true];
+
+/**
+ * Воронка: пять плашек, высота — по числу заказов.
+ *
+ * Своя вёрстка вместо готового компонента: владелец нарисовал ровно такие
+ * прямоугольники с зазорами, а библиотечная воронка рисует слитную фигуру с
+ * плавными переходами. Здесь пять div-ов, и совпадение с макетом точное.
+ *
+ * Высота не пропорциональна значению целиком: у ступени есть минимум, иначе
+ * «1 заказ из 40» превращается в полоску, в которую не влезает даже цифра.
+ */
+function Funnel({
+  steps,
+}: {
+  steps: { label: string; value: number; share: number; display: string }[];
+}) {
+  const max = Math.max(...steps.map((step) => step.value), 1);
+  const MIN_HEIGHT = 66;
+  const MAX_HEIGHT = 132;
+
+  return (
+    <div className="funnel-steps">
+      {steps.map((step, index) => (
+        <div
+          key={step.label}
+          className={`funnel-step ${FUNNEL_DARK_TEXT[index] ? "on-light" : ""}`}
+          style={{
+            background: FUNNEL_COLORS[index] ?? FUNNEL_COLORS.at(-1),
+            height: MIN_HEIGHT + (step.value / max) * (MAX_HEIGHT - MIN_HEIGHT),
+          }}
+        >
+          <span className="funnel-value">{step.display}</span>
+          <span className="funnel-share">{step.share}%</span>
+          <span className="funnel-label">{step.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** Готовые отрезки: ими меряют торговлю чаще всего. */
 const PRESETS = [
@@ -231,7 +280,7 @@ export default function Stats() {
       <div className="stats-grid">
       {/* ─── Продажи ─── */}
       <section className="card span-8">
-        <h2>Продажи</h2>
+        <h2><IconSales />Продажи</h2>
         {/* Четыре числа, и все разные. «Оформлено» — сколько людей дошло до
             конца, «продано» — сколько денег подтвердили. Расхождение между ними
             не ошибка, а неоплаченные заказы, поэтому подписано словами. */}
@@ -286,7 +335,7 @@ export default function Stats() {
 
       {/* ─── Клиенты ─── */}
       <section className="card span-4">
-        <h2>Клиенты</h2>
+        <h2><IconClients />Клиенты</h2>
         <div className="served">
           {/* Число накопительное и от периода не зависит: «обслужено» — это
               итог работы бота, а не выработка за неделю. */}
@@ -317,31 +366,14 @@ export default function Stats() {
 
       {/* ─── Путь заказа ─── */}
       <section className="card span-8">
-        <h2>Путь заказа</h2>
+        <h2><IconDelivery />Путь заказа</h2>
         <p className="muted small">
           Где заказы останавливаются. Ступени считаются по пройденному пути, а не
           по нынешнему статусу: заказ, который уже отправлен, засчитан и на
           прежних шагах.
         </p>
         {funnel.steps[0].value ? (
-          <div className="funnel-panel">
-            <FunnelChart
-              data={funnel.steps.map((step, index) => ({
-                label: step.label,
-                value: step.value,
-                displayValue: step.display,
-                color: FUNNEL_COLORS[index] ?? FUNNEL_COLORS.at(-1),
-              }))}
-              layers={3}
-              edges="curved"
-              labelLayout="spread"
-              /* Ступени разделяет чёрный зазор, а не линии сетки: на тёмной
-                 подложке он читается как прорезь между цветными блоками. */
-              gap={6}
-              grid={false}
-              className="funnel"
-            />
-          </div>
+          <Funnel steps={funnel.steps} />
         ) : (
           <p className="muted">Заказов за период нет — рисовать нечего.</p>
         )}
@@ -373,7 +405,7 @@ export default function Stats() {
           воронкой: «отменено 7» само по себе ничего не объясняет, а «семь раз не
           дозвонились» — уже повод что-то поменять. */}
       <section className="card span-4">
-        <h2>Почему отменяли</h2>
+        <h2><IconCancelled />Почему отменяли</h2>
         {data.cancelled_orders.length ? (
           /* Лентой с отметками: отмены — события, и так видно, что их было
              несколько подряд, а не просто перечень строк. */
@@ -396,7 +428,7 @@ export default function Stats() {
 
       {/* ─── Товары ─── */}
       <section className="card span-7">
-        <h2>Что покупают</h2>
+        <h2><IconBasket />Что покупают</h2>
         {products.top.length ? (
           <div className="pie-row">
             <PieChart
@@ -484,7 +516,7 @@ export default function Stats() {
       </section>
 
       <section className="card span-5">
-        <h2>Лежит без движения</h2>
+        <h2><IconStock />Лежит без движения</h2>
         <p className="muted small">
           Товары на витрине, которые за период не купили ни разу. Те, у которых
           просто кончился размер, сюда не попадают — их видно в «Остатках».

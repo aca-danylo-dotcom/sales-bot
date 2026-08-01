@@ -149,8 +149,10 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 28px;
-  flex-wrap: wrap;
-  padding: 14px 28px;
+  /* Высота держится ячейкой меню в спокойном состоянии (36) плюс поля: без
+     этого шапка дёргалась бы, когда значок под курсором раздувается. */
+  min-height: 68px;
+  padding: 10px 28px;
   background: rgba(255, 255, 255, 0.82);
   backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 1px solid var(--line);
@@ -164,10 +166,126 @@ a:hover { text-decoration: underline; }
 }
 .brand:hover { text-decoration: none; opacity: 0.7; }
 
-.topbar nav { display: flex; gap: 22px; font-size: 14px; }
-.topbar nav a { color: var(--muted); }
-.topbar nav a:hover { color: var(--text); text-decoration: none; }
-.topbar nav a.active { color: var(--text); font-weight: 600; }
+/* ─── Меню разделов ───
+   «Плавающая» панель: значок под курсором раздувается, соседние — слабее.
+   Движение считает components/ui/floating-dock.tsx, здесь только вид.
+
+   Меню стоит по центру шапки независимо от длины названия магазина, поэтому
+   оно вынуто из потока: при обычном выравнивании длинное название сдвигало бы
+   его вбок, и на разных страницах центр оказывался бы в разных местах. */
+.dock {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(240, 240, 244, 0.9);
+}
+
+.dock-item { display: block; line-height: 0; }
+.dock-item:hover { text-decoration: none; }
+
+.dock-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  box-shadow: 0 1px 2px rgba(20, 26, 60, 0.06);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.dock-item:hover .dock-cell { color: var(--text); }
+
+/* Текущий раздел — синим. По меню в панели понимают, где находятся, и метка
+   должна читаться, даже когда курсора на экране нет вовсе. */
+.dock-cell[data-active="true"] {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.35);
+}
+.dock-item:hover .dock-cell[data-active="true"] { color: #fff; }
+
+/* Значок тянется за ячейкой: motion задаёт размер рамке, а картинка внутри
+   занимает её целиком. */
+.dock-glyph { display: block; }
+.dock-glyph svg { width: 100%; height: 100%; stroke-width: 1.75; }
+
+/* Подпись — под значком: меню стоит сверху, и над ним места нет. */
+.dock-tip {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: var(--text);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ─── Меню на узком экране ─── */
+
+.dock-menu { display: none; position: relative; margin-left: auto; }
+
+.dock-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #f0f0f4;
+  color: var(--text);
+  cursor: pointer;
+}
+.dock-toggle svg { width: 20px; height: 20px; }
+
+.dock-drop {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 190px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow:
+    0 1px 2px rgba(20, 26, 60, 0.06),
+    0 12px 32px rgba(20, 26, 60, 0.14);
+}
+.dock-drop .dock-item { line-height: normal; }
+.dock-drop .dock-cell {
+  justify-content: flex-start;
+  gap: 10px;
+  aspect-ratio: auto;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-size: 15px;
+}
+.dock-drop .dock-cell[data-active="true"] { background: var(--accent-soft); color: var(--accent); }
+.dock-drop .dock-glyph { width: 18px; height: 18px; flex: 0 0 18px; }
+
+/* Ниже этой ширины раздутый значок и четыре подписи рядом уже не помещаются
+   вместе с названием магазина — меню сворачивается в кнопку. */
+@media (max-width: 720px) {
+  .dock { display: none; }
+  .dock-menu { display: block; }
+}
 
 /* ─── Страница ─── */
 

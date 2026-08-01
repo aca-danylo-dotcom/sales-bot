@@ -7,8 +7,11 @@
  * см. catch-all в web/app.py.
  */
 import { Suspense, lazy } from "react";
-import { NavLink, Link, Route, Routes } from "react-router-dom";
+import { Link, Route, Routes } from "react-router-dom";
+import { ChartColumn, LayoutDashboard, Package, Receipt } from "lucide-react";
 
+import { FloatingDock } from "./components/ui/floating-dock";
+import type { DockItem } from "./components/ui/floating-dock";
 import { FlashMessages } from "./lib/flash";
 import { useMeta } from "./lib/meta";
 import { NewOrderToasts } from "./notifications/NewOrderToasts";
@@ -26,6 +29,16 @@ import { EmptyState, Loading } from "./components/ui";
    за собой библиотеку графиков — незачем задерживать из-за неё «Заказы»,
    которые открывают каждые пять минут. */
 const Stats = lazy(() => import("./pages/Stats"));
+
+/* Разделы панели. `end` только у сводки: её адрес — начало всех остальных.
+   «Товары» подсвечиваются и на остатках, и в карточке товара — остатки не
+   отдельный раздел, а второй вид тех же товаров. */
+const SECTIONS: DockItem[] = [
+  { title: "Сводка", to: "/", end: true, icon: <LayoutDashboard /> },
+  { title: "Заказы", to: "/orders", icon: <Receipt /> },
+  { title: "Товары", to: "/products", icon: <Package /> },
+  { title: "Статистика", to: "/stats", icon: <ChartColumn /> },
+];
 
 function NotFound() {
   return (
@@ -45,23 +58,7 @@ export default function App() {
         <Link className="brand" to="/">
           {meta?.shop_name ?? "CRM"}
         </Link>
-        <nav>
-          {/* `end` только у сводки: её адрес — префикс всех остальных.
-              «Товары» подсвечиваются и на остатках, и в карточке товара —
-              остатки не отдельный раздел, а второй вид тех же товаров. */}
-          <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
-            Сводка
-          </NavLink>
-          <NavLink to="/orders" className={({ isActive }) => (isActive ? "active" : "")}>
-            Заказы
-          </NavLink>
-          <NavLink to="/products" className={({ isActive }) => (isActive ? "active" : "")}>
-            Товары
-          </NavLink>
-          <NavLink to="/stats" className={({ isActive }) => (isActive ? "active" : "")}>
-            Статистика
-          </NavLink>
-        </nav>
+        <FloatingDock items={SECTIONS} />
       </header>
 
       <main className="page">

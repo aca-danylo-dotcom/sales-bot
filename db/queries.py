@@ -1747,7 +1747,14 @@ async def idle_products(*, date_from: str, date_to: str, limit: int = 8) -> list
     async with get_connection() as conn:
         cursor = await conn.execute(
             f"""SELECT p.id, p.title, p.category, p.price,
-                       COALESCE(SUM(v.stock), 0) AS stock
+                       COALESCE(SUM(v.stock), 0) AS stock,
+                       -- Снимок нужен, чтобы список читался глазами: товар
+                       -- узнают по картинке быстрее, чем по названию из
+                       -- восьми слов.
+                       (SELECT id FROM product_photos ph
+                        WHERE ph.product_id = p.id
+                        ORDER BY ph.is_main DESC, ph.sort_order, ph.id
+                        LIMIT 1) AS main_photo_id
                 FROM products p
                 JOIN product_variants v ON v.product_id = p.id
                 WHERE p.is_active = 1

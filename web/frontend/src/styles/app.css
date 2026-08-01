@@ -883,26 +883,25 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 /* Графику нужна ширина карточки целиком: столбики за месяц иначе слипаются. */
 .chart { margin-top: 8px; }
 
-/* Воронка на светлом фоне, как и вся панель. Цвет ступеням даёт сама воронка
-   (переход от синего к зелёному), поэтому тёмная подложка больше не нужна —
-   на белом цифры и подписи читаются лучше.
+/* Воронка — на чёрной подложке: так её видел владелец в макете, и цветные
+   ступени на чёрном действительно звонче, чем на белом.
 
-   Переменные перекрыты на месте: значения ступеней — чёрные, подписи серые,
-   пилюля с процентом — чёрная с белой цифрой (её цвета компонент берёт из
-   foreground/background). Полосы фона едва заметны — они только держат
-   вертикальный ритм. */
+   Переменные перекрыты на месте, поэтому компонент сам рисует как надо: белые
+   значения сверху, белые подписи снизу, а пилюля с процентом получается белой
+   с чёрной цифрой — её цвета берутся из foreground/background наоборот.
+   Разделители между ступенями — тоже чёрные, они прорезают цвет полосами. */
 .funnel-panel {
   margin: 14px 0 18px;
-  padding: 18px 12px 10px;
+  padding: 20px 14px 12px;
   border-radius: 14px;
-  background: #fbfbfd;
+  background: #0b0b0c;
 
-  --color-foreground: var(--text);
-  --color-background: #ffffff;
-  --color-muted-foreground: var(--muted);
-  --color-muted: #f0f0f3;
-  --chart-grid: var(--line);
-  --chart-label: var(--muted);
+  --color-foreground: #ffffff;
+  --color-background: #0b0b0c;
+  --color-muted-foreground: #f5f5f7;
+  --color-muted: #0b0b0c;
+  --chart-grid: #0b0b0c;
+  --chart-label: #f5f5f7;
 }
 
 .funnel { width: 100%; }
@@ -917,9 +916,61 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 }
 .pie-legend { min-width: 190px; flex: 1; }
 
-/* Список отмен в узкой карточке: строка в строку, без «дата справа от текста» —
-   на четырёх колонках это превращается в кашу. */
-.span-4 .notes li { flex-direction: column; align-items: flex-start; gap: 2px; }
+/* Отмены лентой: тонкая линия с отметками слева, каждое событие — плашка.
+   Так видно, что отмены случались одна за другой, а не просто перечислены. */
+.events {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0 0 0 20px;
+  position: relative;
+}
+.events::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background: var(--line);
+}
+.events li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 13px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: #f5f5f7;
+}
+.events li:last-child { margin-bottom: 0; }
+/* Отметка на линии. Обводка цветом карточки прячет линию под кружком. */
+.events li::before {
+  content: "";
+  position: absolute;
+  left: -21px;
+  top: 16px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c7c7cc;
+  box-shadow: 0 0 0 3px var(--card);
+}
+.events .text { line-height: 1.45; }
+
+/* Залежавшиеся товары — со снимком: длинное название читается медленно,
+   картинка узнаётся сразу. */
+.idle-list { list-style: none; margin: 14px 0 0; padding: 0; }
+.idle-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.idle-list li:last-child { border-bottom: none; }
+.idle-list .idle-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.idle-list .thumb { flex: none; }
 
 /* Счётчик обслуженных: единственное место в панели с крупной цифрой ради самой
    цифры. Она накопительная и меняется редко — потому и заметная. */

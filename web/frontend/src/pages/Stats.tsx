@@ -96,7 +96,14 @@ type Stats = {
     total_revenue_text: string;
     total_units: number;
     titles: number;
-    idle: { id: number; title: string; category: string | null; price_text: string; stock: number }[];
+      idle: {
+      id: number;
+      title: string;
+      category: string | null;
+      price_text: string;
+      stock: number;
+      main_photo_id: number | null;
+    }[];
     zero_stock: number;
   };
 };
@@ -235,7 +242,7 @@ export default function Stats() {
             <span className="stat-sub">{sales.placed_text}</span>
           </Link>
           <Link className="stat" to={ordersHref({ status: "done" })}>
-            <span className="stat-title">Продано</span>
+            <span className="stat-title">Принято</span>
             <span className="stat-value">{sales.paid_revenue_text}</span>
             <span className="stat-sub">оплата подтверждена</span>
           </Link>
@@ -328,7 +335,10 @@ export default function Stats() {
               layers={3}
               edges="curved"
               labelLayout="spread"
-              grid={{ bands: true, lines: true }}
+              /* Ступени разделяет чёрный зазор, а не линии сетки: на тёмной
+                 подложке он читается как прорезь между цветными блоками. */
+              gap={6}
+              grid={false}
               className="funnel"
             />
           </div>
@@ -365,7 +375,9 @@ export default function Stats() {
       <section className="card span-4">
         <h2>Почему отменяли</h2>
         {data.cancelled_orders.length ? (
-          <ul className="notes">
+          /* Лентой с отметками: отмены — события, и так видно, что их было
+             несколько подряд, а не просто перечень строк. */
+          <ul className="events">
             {data.cancelled_orders.map((order) => (
               <li key={order.id}>
                 <span className="text">
@@ -389,8 +401,8 @@ export default function Stats() {
           <div className="pie-row">
             <PieChart
               data={slices}
-              size={210}
-              innerRadius={64}
+              size={170}
+              innerRadius={54}
               padAngle={0.02}
               cornerRadius={6}
               hoveredIndex={hovered}
@@ -478,13 +490,27 @@ export default function Stats() {
           просто кончился размер, сюда не попадают — их видно в «Остатках».
         </p>
         {products.idle.length ? (
-          <ul className="zero-stock">
+          /* С миниатюрами: товар узнают по картинке быстрее, чем по названию
+             из восьми слов, а названия здесь именно такие. */
+          <ul className="idle-list">
             {products.idle.map((row) => (
               <li key={row.id}>
-                <Link to={`/products/${row.id}`}>{row.title}</Link>
-                <span className="muted small">
-                  {row.category || "без категории"} · {row.price_text} · на складе{" "}
-                  {row.stock}
+                {row.main_photo_id ? (
+                  <img
+                    className="thumb"
+                    src={`/media/${row.main_photo_id}`}
+                    alt=""
+                    loading="lazy"
+                  />
+                ) : (
+                  <span className="thumb empty">—</span>
+                )}
+                <span className="idle-main">
+                  <Link to={`/products/${row.id}`}>{row.title}</Link>
+                  <span className="muted small">
+                    {row.category || "без категории"} · {row.price_text} · на складе{" "}
+                    {row.stock}
+                  </span>
                 </span>
               </li>
             ))}

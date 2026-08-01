@@ -101,6 +101,16 @@ type Stats = {
   };
 };
 
+/**
+ * Цвета ступеней воронки — переход от синего к зелёному.
+ *
+ * Не случайный набор: синий у нас значит «начало разговора», зелёный —
+ * «получилось» (им же помечен статус «выполнен» в списке заказов). Поэтому
+ * ступени и идут от одного к другому — движение к успеху видно даже до того,
+ * как человек прочитает подписи.
+ */
+const FUNNEL_COLORS = ["#0071e3", "#2b8fe6", "#00a9a5", "#17a866", "#1d9d5c"];
+
 /** Готовые отрезки: ими меряют торговлю чаще всего. */
 const PRESETS = [
   { days: 7, title: "7 дней" },
@@ -245,14 +255,14 @@ export default function Stats() {
                 края. Суммы человек видит в подсказке под курсором. */}
             <BarChart data={data.by_day} xDataKey="label" aspectRatio="3 / 1">
               <Grid horizontal />
-              <Bar dataKey="revenue" fill="var(--chart-2)" />
+              <Bar dataKey="revenue" fill="var(--chart-1)" />
               <BarXAxis maxLabels={10} />
               <ChartTooltip
                 rows={(point) => [
                   {
                     label: "Выручка",
                     value: String(point.revenue_text ?? ""),
-                    color: "var(--chart-2)",
+                    color: "var(--chart-1)",
                   },
                 ]}
               />
@@ -305,12 +315,12 @@ export default function Stats() {
         {funnel.steps[0].value ? (
           <div className="funnel-panel">
             <FunnelChart
-              data={funnel.steps.map((step) => ({
+              data={funnel.steps.map((step, index) => ({
                 label: step.label,
                 value: step.value,
                 displayValue: step.display,
+                color: FUNNEL_COLORS[index] ?? FUNNEL_COLORS.at(-1),
               }))}
-              color="#4a4a4f"
               layers={3}
               edges="curved"
               labelLayout="spread"

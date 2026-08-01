@@ -1,5 +1,10 @@
 "use client";
 
+/* Компонент из реестра @bklit, взят как есть. Наше единственное отступление:
+   у числа, процента и названия ступени проставлены `data-slot`, чтобы их можно
+   было оформить из app.css. Оригинал кладёт все три подписи прямо на цветную
+   заливку и красит название в серый — на нашей палитре оно с ней сливалось. */
+
 import type { Transition } from "motion/react";
 import { motion, useTransform } from "motion/react";
 import {
@@ -624,17 +629,17 @@ function SegmentLabel({
   const display = stage.displayValue ?? formatValue(stage.value);
 
   const valueEl = showValues && (
-    <span className="whitespace-nowrap font-semibold text-foreground text-sm">
+    <span data-slot="funnel-value" className="whitespace-nowrap font-semibold text-foreground text-sm">
       {display}
     </span>
   );
   const pctEl = showPercentage && (
-    <span className="rounded-full bg-foreground px-3 py-1 font-bold text-background text-xs shadow-sm">
+    <span data-slot="funnel-pct" className="rounded-full bg-foreground px-3 py-1 font-bold text-background text-xs shadow-sm">
       {formatPercentage(pct)}
     </span>
   );
   const labelEl = showLabels && (
-    <span className="whitespace-nowrap font-medium text-muted-foreground text-xs">
+    <span data-slot="funnel-label" className="whitespace-nowrap font-medium text-muted-foreground text-xs">
       {stage.label}
     </span>
   );

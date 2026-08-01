@@ -17,8 +17,14 @@
  */
 export function StatsBackdrop() {
   return (
-    <div className="stats-backdrop" aria-hidden="true">
-      <svg className="stats-bag" viewBox="0 0 300 400" fill="none">
+    <>
+      {/* Свет и лучи — на весь экран и не двигаются: это освещение комнаты. */}
+      <div className="stats-backdrop" aria-hidden="true" />
+
+      {/* Пакет, наоборот, привязан к колонке с карточками и уезжает вместе с
+          ней при прокрутке. Он стоит за блоком «Клиенты» и выглядывает из-под
+          него — карточки непрозрачные и закрывают всё, кроме краёв. */}
+      <svg className="stats-bag" viewBox="0 0 300 400" fill="none" aria-hidden="true">
         <defs>
           {/* Лицевая грань светлее к верху — так падает свет из угла экрана. */}
           <linearGradient id="bag-front" x1="0.1" y1="0" x2="0.95" y2="1">
@@ -83,6 +89,6 @@ export function StatsBackdrop() {
           opacity="0.6"
         />
       </svg>
-    </div>
+    </>
   );
 }

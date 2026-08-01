@@ -547,6 +547,10 @@ input[type="file"]:hover { border-color: #d6d6dc; }
 .grid tbody tr:hover { background: #fafafc; }
 
 .grid .num { text-align: right; white-space: nowrap; }
+/* Явно и для шапки: без этого «ШТУК» и «ВЫРУЧКА» прижимаются к левому краю
+   своей колонки, а числа под ними стоят у правого — подпись оказывается не над
+   данными, а где-то сбоку. */
+.grid th.num { text-align: right; }
 .grid td .small { display: block; }
 
 .thumb-col { width: 60px; }
@@ -879,25 +883,26 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
 /* Графику нужна ширина карточки целиком: столбики за месяц иначе слипаются. */
 .chart { margin-top: 8px; }
 
-/* Воронка живёт на тёмной подложке — так её просил владелец, и так она честнее
-   читается: полупрозрачные слои сегментов на белом почти не видны, а на
-   графитовом фоне разница между ступенями различима с одного взгляда.
-   Панель остаётся светлой: тёмный здесь только этот блок.
+/* Воронка на светлом фоне, как и вся панель. Цвет ступеням даёт сама воронка
+   (переход от синего к зелёному), поэтому тёмная подложка больше не нужна —
+   на белом цифры и подписи читаются лучше.
 
-   Переменные перекрыты на месте — компоненты внутри рисуют по ним, поэтому
-   белые цифры, серые подписи и тёмный текст на пилюле получаются сами. */
+   Переменные перекрыты на месте: значения ступеней — чёрные, подписи серые,
+   пилюля с процентом — чёрная с белой цифрой (её цвета компонент берёт из
+   foreground/background). Полосы фона едва заметны — они только держат
+   вертикальный ритм. */
 .funnel-panel {
-  margin: 18px 0 22px;
-  padding: 26px 20px 16px;
-  border-radius: 16px;
-  background: #0b0b0c;
+  margin: 14px 0 18px;
+  padding: 18px 12px 10px;
+  border-radius: 14px;
+  background: #fbfbfd;
 
-  --color-foreground: #f5f5f7;
-  --color-background: #0b0b0c;
-  --color-muted-foreground: #86868b;
-  --color-muted: #17171a;
-  --chart-grid: #2e2e33;
-  --chart-label: #86868b;
+  --color-foreground: var(--text);
+  --color-background: #ffffff;
+  --color-muted-foreground: var(--muted);
+  --color-muted: #f0f0f3;
+  --chart-grid: var(--line);
+  --chart-label: var(--muted);
 }
 
 .funnel { width: 100%; }

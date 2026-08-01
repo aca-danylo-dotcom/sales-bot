@@ -337,6 +337,14 @@ h2 {
 
 .btn.small { font-size: 13px; padding: 5px 11px; }
 
+/* Цвет круга, разбегающегося при нажатии (см. components/ripple.tsx). Голубой
+   из присланного примера идёт всем, кроме двух случаев: на синей кнопке он
+   пропал бы в фоне, а на кнопке удаления голубая вспышка спорит с красной
+   надписью. */
+.btn { --ripple: #add8e6; }
+.btn.primary { --ripple: #d6ecff; }
+.btn.danger-btn { --ripple: #ffcdc9; }
+
 /* Кнопка, пока запрос в пути. Раньше повторную отправку ловил app.js: страница
    перезагружалась целиком, и живая кнопка успевала принять второй тап. Теперь
    её гасит сам React по состоянию запроса, но вид «занята» нужен прежний. */
@@ -621,6 +629,9 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
 
 .tab .count { color: var(--muted); font-size: 12px; }
 .tab.active .count { color: rgba(255, 255, 255, 0.7); }
+
+/* Вкладки — те же кнопки, только фильтруют список. Отзываются так же. */
+.tab, .tabs a { --ripple: #add8e6; }
 
 /* ─── Карточка заказа ─── */
 
@@ -1120,6 +1131,38 @@ a.stat:hover { background: #ececf0; text-decoration: none; }
   cursor: pointer;
 }
 .toast-close:hover { color: var(--text); }
+
+/* ─── Круг под нажатием ─── */
+
+/* Круги рисуются поверх страницы отдельным слоем, а не внутри кнопок: см.
+   components/ripple.tsx. Слой ничего не ловит и лежит выше окна «Точно
+   удалить?» (z-50), иначе кнопки в нём отзывались бы молча. */
+.ripple-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+/* Рамка по размеру кнопки: круг не должен вылезать за её скругления. */
+.ripple-clip {
+  position: absolute;
+  overflow: hidden;
+}
+
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  transform: scale(0);
+  animation: ripple-out 600ms ease-out;
+}
+
+/* Оригинал начинает с непрозрачного круга — но там он лежит под надписью. Наш
+   идёт поверх, поэтому начинает вполсилы: так надпись читается всё время. */
+@keyframes ripple-out {
+  from { transform: scale(0); opacity: 0.45; }
+  to   { transform: scale(2); opacity: 0; }
+}
 
 /* ─── Узкий экран ─── */
 

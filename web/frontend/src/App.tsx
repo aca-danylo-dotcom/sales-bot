@@ -19,6 +19,7 @@ import ProductNew from "./pages/ProductNew";
 import Products from "./pages/Products";
 import Stock from "./pages/Stock";
 import Summary from "./pages/Summary";
+import { RippleLayer } from "./components/ripple";
 import { EmptyState, Loading } from "./components/ui";
 
 /* Статистика грузится отдельным куском. Её открывают раз в неделю, а тянет она
@@ -82,6 +83,10 @@ export default function App() {
 
       {/* Карточки о новых заказах — поверх всего, в правом нижнем углу. */}
       <NewOrderToasts />
+
+      {/* Круг, разбегающийся при нажатии на любую кнопку панели. Стоит один раз
+          здесь: кнопки о нём не знают и ничего для него не делают. */}
+      <RippleLayer />
     </>
   );
 }

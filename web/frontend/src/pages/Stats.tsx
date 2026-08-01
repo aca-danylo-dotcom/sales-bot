@@ -158,9 +158,13 @@ export default function Stats() {
   const ordersHref = (extra: Record<string, string> = {}) =>
     `/orders${buildQuery({ from: data.date_from, to: data.date_to, ...extra })}`;
 
+  /* Доли круга — в штуках, а не в деньгах. Блок отвечает на вопрос «что
+     покупают», и ответ на него — количество: дорогой товар, проданный один
+     раз, занимал бы полкруга и выглядел как ходовой. Деньги по каждому товару
+     видно в таблице ниже, общая выручка — в блоке «Продажи». */
   const slices = products.top.map((row, index) => ({
     label: row.title,
-    value: row.revenue,
+    value: row.units,
     // Восемь цветов палитры по кругу: девятая доля («остальные») получит
     // первый цвет снова — она и так подписана словом.
     color: `var(--chart-${(index % 8) + 1})`,
@@ -395,13 +399,15 @@ export default function Stats() {
               {slices.map((_, index) => (
                 <PieSlice key={index} index={index} />
               ))}
-              <PieCenter defaultLabel="Продано" />
+              {/* В центре — сколько всего штук продано за период. Наведение на
+                  долю подменяет его количеством по этому товару. */}
+              <PieCenter defaultLabel="товаров продано" />
             </PieChart>
 
             <Legend
-              items={slices.map((slice, index) => ({
+              items={slices.map((slice) => ({
                 label: slice.label,
-                value: products.top[index].revenue,
+                value: slice.value,
                 color: slice.color,
               }))}
               hoveredIndex={hovered}
@@ -409,18 +415,15 @@ export default function Stats() {
               className="pie-legend"
             >
               {/* Строкой, а не столбиком: без раскладки компонент ставит
-                  маркер, название и сумму друг под другом, и список из восьми
+                  маркер, название и число друг под другом, и список из восьми
                   товаров разъезжается. Длинные названия обрезаем — полные
-                  видно в таблице ниже. Суммы форматирует сервер. */}
+                  видно в таблице ниже. */}
               <LegendItem className="flex items-center gap-2">
                 <LegendMarker className="h-2.5 w-2.5 shrink-0" />
                 <LegendLabel className="min-w-0 flex-1 truncate text-sm" />
                 <LegendValue
                   className="shrink-0 text-sm tabular-nums"
-                  formatValue={(value) =>
-                    products.top.find((row) => row.revenue === value)?.revenue_text ??
-                    String(value)
-                  }
+                  formatValue={(value) => `${value} шт`}
                 />
               </LegendItem>
             </Legend>
@@ -438,7 +441,10 @@ export default function Stats() {
                   <th className="num">Штук</th>
                   <th className="num">Заказов</th>
                   <th className="num">Выручка</th>
-                  <th className="num">Доля</th>
+                  {/* Подписано словом «выручки» не зря: круг рядом делит по
+                      штукам, и без уточнения два числа выглядели бы как одно
+                      и то же, посчитанное по-разному. */}
+                  <th className="num">Доля выручки</th>
                 </tr>
               </thead>
               <tbody>

@@ -9,11 +9,12 @@
  * Созданный товар открывается в карточке и остаётся скрытым: даже заполненный
  * целиком, его стоит посмотреть глазами, прежде чем показывать клиентам.
  */
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
 import { get } from "../api/client";
+import { PhotoPicker } from "../components/photo-picker";
 import { BackLink, Head, Problems } from "../components/ui";
 import { useAction } from "../lib/actions";
 import { useMeta, usePageTitle } from "../lib/meta";
@@ -48,7 +49,6 @@ export default function ProductNew() {
   });
   const [rows, setRows] = useState<Row[]>(() => Array.from({ length: START_ROWS }, () => emptyRow));
   const [files, setFiles] = useState<File[]>([]);
-  const picker = useRef<HTMLInputElement>(null);
 
   const create = useAction({
     invalidate: [["products"], ["summary"]],
@@ -60,11 +60,6 @@ export default function ProductNew() {
 
   const setRow = (index: number, patch: Partial<Row>) =>
     setRows(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-
-  const addFiles = (chosen: FileList | null) => {
-    if (chosen?.length) setFiles([...files, ...Array.from(chosen)]);
-    if (picker.current) picker.current.value = "";
-  };
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -246,37 +241,11 @@ export default function ProductNew() {
 
         <section className="card">
           <h2>Фото</h2>
-          <div className="form upload">
-            <label>
-              <span>Выбрать фото</span>
-              <input
-                ref={picker}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={(event) => addFiles(event.target.files)}
-              />
-            </label>
-            <span className="muted small">
-              Можно выбрать сразу несколько — первое станет главным.
-            </span>
-            {files.length ? (
-              <ul className="picked">
-                {files.map((file, index) => (
-                  <li key={`${file.name}-${index}`}>
-                    <span className="text">{file.name}</span>
-                    <button
-                      className="btn ghost small"
-                      type="button"
-                      onClick={() => setFiles(files.filter((_, i) => i !== index))}
-                    >
-                      Убрать
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
+          <PhotoPicker
+            files={files}
+            onChange={setFiles}
+            hint="Можно выбрать сразу несколько — первое станет главным."
+          />
         </section>
 
         <div className="actions sticky">

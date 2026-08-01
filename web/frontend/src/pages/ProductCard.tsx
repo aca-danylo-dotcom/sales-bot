@@ -12,12 +12,13 @@
  * заменял первый; здесь такой заботы нет — список наш, а `input` только
  * пополняет его.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { get, query as buildQuery } from "../api/client";
 import { useConfirm } from "../components/confirm";
+import { PhotoPicker } from "../components/photo-picker";
 import { BackLink, Head, Loading, LoadError, Problems, Tag } from "../components/ui";
 import { useAction } from "../lib/actions";
 import { useMeta, usePageTitle } from "../lib/meta";
@@ -95,7 +96,6 @@ export default function ProductCard() {
   const [stock, setStock] = useState<Record<number, string>>({});
   const [fresh, setFresh] = useState({ size: "", color: "", stock: "" });
   const [files, setFiles] = useState<File[]>([]);
-  const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!data) return;
@@ -144,12 +144,6 @@ export default function ProductCard() {
       }
     );
 
-  const addFiles = (chosen: FileList | null) => {
-    if (chosen?.length) setFiles([...files, ...Array.from(chosen)]);
-    // Сброс поля: иначе выбрать тот же файл второй раз браузер не даст —
-    // значение не изменилось, события не будет.
-    if (picker.current) picker.current.value = "";
-  };
 
   const deleteVariant = async (variant: Variant) => {
     const label = [variant.size, variant.color].filter(Boolean).join(" · ") || "без названия";
@@ -400,37 +394,11 @@ export default function ProductCard() {
           <p className="muted">Фото пока нет. Клиенту такой товар уйдёт текстом.</p>
         )}
 
-        <div className="form upload">
-          <label>
-            <span>Добавить фото</span>
-            <input
-              ref={picker}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(event) => addFiles(event.target.files)}
-            />
-          </label>
-          <span className="muted small">
-            Файлы загрузятся при сохранении. Одно и то же фото второй раз не добавится.
-          </span>
-          {files.length ? (
-            <ul className="picked">
-              {files.map((file, index) => (
-                <li key={`${file.name}-${index}`}>
-                  <span className="text">{file.name}</span>
-                  <button
-                    className="btn ghost small"
-                    type="button"
-                    onClick={() => setFiles(files.filter((_, i) => i !== index))}
-                  >
-                    Убрать
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+        <PhotoPicker
+          files={files}
+          onChange={setFiles}
+          hint="Файлы загрузятся при сохранении. Одно и то же фото второй раз не добавится."
+        />
       </section>
 
       {/* Удаление внизу, а не в шапке: сверху оно попадалось под палец при

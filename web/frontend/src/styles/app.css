@@ -798,37 +798,45 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   margin-top: 8px;
 }
 
-.upload { flex-direction: row; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
-.upload label { max-width: 360px; }
+/* Выбор фото: плитки с превью. Повторный выбор в диалоге добавляет снимки, а
+   не заменяет набор — продавец снимает товар в несколько заходов. Раньше это
+   чинил app.js через DataTransfer, теперь набор живёт в состоянии React. */
+.photo-picker { margin-top: 12px; }
+.photo-picker > p { margin: 8px 0 0; }
 
-/* Файлы, выбранные до сохранения. Повторный выбор в диалоге должен добавлять
-   фото, а не заменять весь набор: продавец снимает товар в несколько заходов.
-   Раньше это чинил app.js через DataTransfer, теперь список просто живёт в
-   состоянии React — а вид остался прежним. */
-.picked {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
+/* Пунктирная плитка «Добавить» — она же место, куда бросают файлы. */
+.photo-picker.over .photo-add {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
-.picked li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 13px;
-  color: var(--muted);
-  background: #f5f5f7;
-  border-radius: 10px;
-  padding: 6px 8px 6px 12px;
-}
-.picked li span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+
+/* Плитка выбора нажимается целиком, поэтому под курсором должна отзываться.
+   Фон при наведении задаёт сам компонент — здесь только рамка, иначе два
+   правила спорили бы за одно и то же. */
+.photo-add { cursor: pointer; }
+.photo-add:hover { border-color: #c9cad0; }
+
+/* Утилиты, которые компоненты реестра ждут от своей темы, а у нас их нет:
+   полоса прокрутки у ряда плиток и растворение его краёв. Без них ряд
+   работает, но выглядит обрезанным. */
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
+.scroll-fade-x {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 10px,
+    #000 calc(100% - 10px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 10px,
+    #000 calc(100% - 10px),
+    transparent 100%
+  );
 }
 
 /* ─── Действия над товаром целиком ─── */

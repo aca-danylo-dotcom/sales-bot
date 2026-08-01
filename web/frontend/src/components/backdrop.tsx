@@ -21,58 +21,66 @@ export function StatsBackdrop() {
       <svg className="stats-bag" viewBox="0 0 300 400" fill="none">
         <defs>
           {/* Лицевая грань светлее к верху — так падает свет из угла экрана. */}
-          <linearGradient id="bag-front" x1="0.1" y1="0" x2="0.9" y2="1">
+          <linearGradient id="bag-front" x1="0.1" y1="0" x2="0.95" y2="1">
             <stop offset="0%" stopColor="#ffffff" />
-            <stop offset="52%" stopColor="#f1f3fd" />
-            <stop offset="100%" stopColor="#e0e5f7" />
+            <stop offset="45%" stopColor="#f2f4fd" />
+            <stop offset="100%" stopColor="#dfe5f7" />
           </linearGradient>
-          <linearGradient id="bag-side" x1="0" y1="0" x2="1" y2="0.2">
-            <stop offset="0%" stopColor="#dde2f4" />
-            <stop offset="100%" stopColor="#c9d1ea" />
+          <linearGradient id="bag-side" x1="0" y1="0" x2="1" y2="0.3">
+            <stop offset="0%" stopColor="#d5dcf1" />
+            <stop offset="100%" stopColor="#bcc6e4" />
           </linearGradient>
           <linearGradient id="bag-rim" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#f8f9fe" />
-            <stop offset="100%" stopColor="#e4e9f8" />
+            <stop offset="0%" stopColor="#eff2fc" />
+            <stop offset="100%" stopColor="#d3daf0" />
           </linearGradient>
           <linearGradient id="bag-handle" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#eef1fb" />
-            <stop offset="100%" stopColor="#d5dcf0" />
+            <stop offset="0%" stopColor="#dbe2f5" />
+            <stop offset="100%" stopColor="#c3cde9" />
           </linearGradient>
-          {/* Блик по лицевой грани — широкая размытая полоса. */}
+          {/* Блик по лицевой грани — широкая полоса, растворяющаяся вправо. */}
           <linearGradient id="bag-glare" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.85" />
             <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
           </linearGradient>
         </defs>
 
-        {/* Ручки рисуются первыми: их концы должны уходить под кромку. */}
+        {/* Порядок здесь — это глубина, и менять его нельзя.
+            Дальняя ручка = ближняя, сдвинутая на глубину пакета (+52, −32):
+            так она встаёт по той же перспективе, что и грани. Уходит за
+            кромку, поэтому рисуется первой и чуть темнее. */}
         <path
-          d="M86 104 C86 40 158 40 158 104"
+          d="M148 102 C148 28 226 28 226 102"
+          stroke="#c6d0ea"
+          strokeWidth="8"
+          strokeLinecap="round"
+        />
+
+        {/* Открытая кромка — параллелограмм между лицевой и дальней стенками. */}
+        <path d="M56 132 H200 L252 100 H108 Z" fill="url(#bag-rim)" />
+
+        {/* Боковая грань уходит вглубь, поэтому темнее лицевой. */}
+        <path d="M200 132 L252 100 V318 L200 360 Z" fill="url(#bag-side)" />
+
+        {/* Ближняя ручка крепится к переднему краю: она идёт поверх кромки, но
+            под лицевой стенкой — концы должны уходить в неё, а не висеть. */}
+        <path
+          d="M96 134 C96 60 174 60 174 134"
           stroke="url(#bag-handle)"
           strokeWidth="9"
           strokeLinecap="round"
         />
+
+        {/* Лицевая стенка. Скруглён только левый нижний угол: правый — ребро,
+            стык с боковой гранью, и скругление оставляло бы там зазубрину. */}
+        <path d="M56 132 H200 V360 H66 A10 10 0 0 1 56 350 Z" fill="url(#bag-front)" />
+
+        {/* Складка вдоль дна и блик по стенке. */}
+        <path d="M56 332 H200" stroke="#e2e7f6" strokeWidth="2" />
         <path
-          d="M176 92 C182 34 244 32 240 84"
-          stroke="url(#bag-handle)"
-          strokeWidth="8"
-          strokeLinecap="round"
-          opacity="0.75"
-        />
-
-        {/* Открытая кромка — параллелограмм между лицевой и боковой гранями. */}
-        <path d="M40 104 H198 L262 74 H104 Z" fill="url(#bag-rim)" />
-
-        {/* Боковая грань уходит вглубь, поэтому темнее лицевой. */}
-        <path d="M198 104 L262 74 V308 L198 348 Z" fill="url(#bag-side)" />
-
-        {/* Лицевая грань. Низ скруглён: у бумажного пакета там сгиб. */}
-        <path d="M40 104 H198 V348 H58 A18 18 0 0 1 40 330 Z" fill="url(#bag-front)" />
-
-        <path
-          d="M64 104 L128 104 L74 348 L58 348 A18 18 0 0 1 40 330 L40 200 Z"
+          d="M78 132 H132 L86 360 H66 A10 10 0 0 1 56 350 V236 Z"
           fill="url(#bag-glare)"
-          opacity="0.55"
+          opacity="0.6"
         />
       </svg>
     </div>

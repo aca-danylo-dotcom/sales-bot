@@ -835,7 +835,14 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
    спорит с графитовыми графиками. Здесь ссылку показывает подчёркивание при
    наведении, а не цвет. */
 .stats a:not(.btn) { color: var(--text); }
-.stats a:not(.btn):hover { text-decoration: underline; }
+.stats a:not(.btn):not(.stat):hover { text-decoration: underline; }
+
+/* Плашка с числом — не текст, а карточка: подчёркивать в ней нечего, иначе
+   при наведении «Оформлено», сумма и подпись разом обзаводятся линиями и
+   плашка выглядит поломанной. Отклик даёт фон, он же показывает, что по ней
+   можно перейти в список. */
+.stats a.stat,
+.stats a.stat:hover { text-decoration: none; }
 .stats .btn.ghost { color: var(--text); }
 .stats .btn.ghost:hover { background: #ececf0; }
 

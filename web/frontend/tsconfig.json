@@ -1,5 +1,12 @@
 {
   "files": [],
+  // Псевдоним повторён здесь не для сборки — сборкой правит tsconfig.app.json.
+  // Его читает shadcn: без него он не знает, куда ведёт `@/`, и раскладывает
+  // скачанные компоненты в папку с именем «@» рядом с src.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  },
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }

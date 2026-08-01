@@ -74,7 +74,7 @@
   --color-line: var(--line);
   --color-text: var(--text);
   --color-muted: var(--muted);
-  --color-accent: var(--accent);
+  /* Наш синий живёт под именем `primary` — см. пояснение ниже. */
   --color-accent-soft: var(--accent-soft);
   --color-danger: var(--danger);
   --color-ok: var(--ok);
@@ -87,6 +87,35 @@
   --color-foreground: var(--text);
   --color-background: var(--card);
   --color-muted-foreground: var(--muted);
+
+  /* Имена, которыми размечены компоненты shadcn/ui: `bg-popover`,
+     `border-border`, `text-primary-foreground` и прочие. Заведены здесь, чтобы
+     готовый компонент из реестра приезжал уже в цветах панели и его не
+     приходилось перекрашивать руками.
+
+     Сами переменные `--card`, `--muted`, `--accent`, `--radius` при этом не
+     трогаются: у нас они значат другое (`--muted` — цвет серого текста, у
+     shadcn — светлая заливка), и подмена их значений перекрасила бы всю
+     панель. Поэтому связь сделана на уровне токенов Tailwind, а не сырых
+     переменных.
+
+     Осторожно: `accent` здесь — не наш синий, а фон под курсором, как это
+     слово понимают в shadcn. Наш синий — `primary`. */
+  --color-primary: var(--accent);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f0f0f4;
+  --color-secondary-foreground: var(--text);
+  --color-accent: #f0f0f4;
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: #ffffff;
+  --color-muted: #f0f0f4;
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--accent);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--text);
+  --color-card-foreground: var(--text);
 
   --radius-card: 18px;
 

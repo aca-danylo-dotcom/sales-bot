@@ -86,6 +86,20 @@ PAYMENT_CARD_HOLDER=IVAN PETRENKO
 ORDER_PAYMENT_TIMEOUT_HOURS=24
 CART_REMINDER_HOURS=6
 
+PROMO_PERCENT=5
+PROMO_TTL_DAYS=3
+WINBACK_ENABLED=1
+WINBACK_AFTER_DAYS=14
+WINBACK_COOLDOWN_DAYS=30
+WINBACK_BATCH=20
+
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=
+SMTP_FROM_NAME=
+
 TIMEZONE=Europe/Kiev
 
 DB_PATH=/data/shop.db
@@ -101,6 +115,16 @@ SHEETS_WEBHOOK_TOKEN=
   бот заведёт сам рядом с базой, отдельно указывать не нужно.
 - **`PORT` и `WEB_HOST` не задавать.** Порт Railway сообщает сам, а панель
   должна слушать все интерфейсы, иначе хостинг до неё не достучится.
+- **`PROMO_PERCENT` и `WINBACK_ENABLED` — это деньги и сообщения клиентам.**
+  Значения выше включают скидку 5% в напоминаниях и рассылку «давно не
+  заходили». Если такого пока не нужно, ставьте `PROMO_PERCENT=0` и
+  `WINBACK_ENABLED=0` — бот продолжит напоминать о брошенной корзине, но без
+  скидки, а «уснувшим» писать не будет вовсе. Переменные заданы явно нарочно:
+  без них подставятся те же 5% и включённая рассылка, только молча.
+- **`SMTP_*` пустые — письма выключены**, напоминания идут только в Telegram.
+  Заполнять есть смысл, когда у клиентов начнут появляться адреса (почту они
+  оставляют сами — шаг «Пропустить» при оформлении или команда `/email`). Для
+  Gmail в `SMTP_PASSWORD` нужен **пароль приложения**, а не пароль от аккаунта.
 - `SHEETS_*` — из `docs/GOOGLE_SHEETS.md`. Можно оставить пустыми: бот работает
   и без выгрузки в таблицу.
 - `AGENT_STATS_URL` / `AGENT_STATS_KEY` не задаём — телеметрия магазина пока

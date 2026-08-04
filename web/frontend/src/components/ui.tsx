@@ -150,9 +150,11 @@ export function stamp(value?: string | null): string {
 export function useRowLink() {
   const navigate = useNavigate();
 
+  /* Тип события — общий `HTMLElement`, а не строка таблицы: тем же приёмом
+     открываются пункты списков («Лежит без движения»), а они `<li>`. */
   return (to: string) => ({
     className: "row-link",
-    onClick: (event: MouseEvent<HTMLTableRowElement>) => {
+    onClick: (event: MouseEvent<HTMLElement>) => {
       if ((event.target as HTMLElement).closest("a, button, input, label, select, textarea")) {
         return;
       }

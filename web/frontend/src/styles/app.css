@@ -96,6 +96,12 @@
   --flash-warn-fg: #8a5a00;
   --flash-err-bg: #fff4f4;
   --danger-soft: #fff0f0;
+  /* Плашка срочного дела в «Сводке» — своя пара цветов, заметно ярче общего
+     `--danger-soft`. Тот бледный намеренно: им залиты фоны сообщений и кнопка
+     отмены, где красный не должен кричать. Здесь наоборот — это единственная
+     строка на экране, которую нельзя пропустить. */
+  --urgent-bg: #ffdcdc;
+  --urgent-line: #ffb3b3;
   /* Цвета графиков. Восемь оттенков, потому что в топе товаров восемь долей.
      Первые пять — сама палитра панели от фиолетового к розовому: так круг
      читается как одна вещь, а не как набор случайных цветов. Последние три
@@ -568,8 +574,8 @@ h2 {
 
 /* Срочное — та же плашка в красноватом тоне. Цвет тут значащий: «клиент ждёт
    ответа про деньги» отличается от «надо собрать посылку». */
-.attention li.urgent { background: var(--danger-soft); }
-.attention li.urgent:hover { background: var(--danger-soft); border-color: var(--danger); }
+.attention li.urgent { background: var(--urgent-bg); border-color: var(--urgent-line); }
+.attention li.urgent:hover { background: var(--urgent-bg); border-color: var(--danger); }
 .attention li.urgent .attention-count {
   background: var(--card);
   border-color: transparent;
@@ -1606,10 +1612,17 @@ a.stat:hover .stat-value { color: var(--accent); }
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 0;
+  /* Поля по бокам съедены отрицательным отступом: подсветка при наведении
+     заходит за края списка, а сам список стоит там же, где стоял. */
+  padding: 10px 12px;
+  margin: 0 -12px;
+  border-radius: 12px;
   border-bottom: 1px solid var(--line);
 }
 .idle-list li:last-child { border-bottom: none; }
+/* Пункт открывается нажатием целиком (components/ui.tsx::useRowLink). */
+.idle-list li.row-link { cursor: pointer; transition: background 0.18s ease; }
+.idle-list li.row-link:hover { background: var(--row-hover); }
 .idle-list .idle-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .idle-list .thumb { flex: none; }
 
@@ -1909,6 +1922,10 @@ a.stat:hover .stat-value { color: var(--accent); }
   --flash-warn-fg: #f2c479;
   --flash-err-bg: #3a1d1d;
   --danger-soft: #3a1d1d;
+  /* Срочная плашка и в темноте ярче обычного красного фона, но в свою сторону:
+     на тёмном ярче — значит светлее и насыщеннее, а не белее. */
+  --urgent-bg: #4d2020;
+  --urgent-line: #6b2c2c;
 
   /* Графики. Сами восемь цветов долей остаются дневными — они яркие и на
      тёмном читаются даже лучше. Меняется обвязка: сетка, подписи, фон

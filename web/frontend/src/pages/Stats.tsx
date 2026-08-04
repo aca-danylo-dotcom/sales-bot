@@ -17,7 +17,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { get, query as buildQuery } from "../api/client";
-import { Head, Loading, LoadError, stamp } from "../components/ui";
+import { Head, Loading, LoadError, stamp, useRowLink } from "../components/ui";
 import { NumberTicker } from "../components/number-ticker";
 import {
   IconBasket,
@@ -178,6 +178,10 @@ export default function Stats() {
 
   // Круг и легенда подсвечиваются вместе: наводишь на строку — видно долю.
   const [hovered, setHovered] = useState<number | null>(null);
+
+  // Строки и пункты, которые открываются нажатием целиком, — как в списках
+  // заказов и товаров.
+  const rowLink = useRowLink();
 
   if (isPending) return <Loading />;
   if (error) return <LoadError error={error} onRetry={() => refetch()} />;
@@ -487,7 +491,13 @@ export default function Stats() {
               </thead>
               <tbody>
                 {products.top.map((row) => (
-                  <tr key={row.title}>
+                  /* Последняя строка топа — «остальные», сводная: карточки у
+                     неё нет, и открывать нечего, поэтому нажатие целиком
+                     получают только настоящие товары. */
+                  <tr
+                    key={row.title}
+                    {...(row.product_id ? rowLink(`/products/${row.product_id}`) : {})}
+                  >
                     <td>
                       {row.product_id ? (
                         <Link className="strong" to={`/products/${row.product_id}`}>
@@ -516,7 +526,7 @@ export default function Stats() {
              из восьми слов, а названия здесь именно такие. */
           <ul className="idle-list">
             {products.idle.map((row) => (
-              <li key={row.id}>
+              <li key={row.id} {...rowLink(`/products/${row.id}`)}>
                 {row.main_photo_id ? (
                   <img
                     className="thumb"

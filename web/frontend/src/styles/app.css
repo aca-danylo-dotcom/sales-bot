@@ -31,16 +31,6 @@
      сам: рамка идёт по всему периметру, и полная насыщенность на белой
      карточке читается как ошибка, а не как «сюда можно нажать». */
   --accent-line: #9d82ff;
-  /* Та же рамка в покое — бледнее, но именно сиреневая, а не намёк на неё.
-     Её задача — отделить плашки, которые куда-то ведут, от тех, что просто
-     показывают число: рядом они видны вместе, и разница читается сразу.
-     На белой карточке светлее #cdbfff уже сливается с серой рамкой соседа. */
-  --accent-line-soft: #bda9ff;
-  /* Подложка тех же плашек. Одной рамки в 1 пиксель на белом мало: в тёмной
-     теме сиреневая линия светится на чёрном, а на белом её почти не видно.
-     Оттенок заливки едва различим сам по себе, но вместе с рамкой даёт
-     плашке вид кнопки, а не подписи. */
-  --accent-tint: #f8f6ff;
   /* Тёмный конец палитры — для текста на светлой подложке: сам акцент на
      `--accent-soft` даёт всего 4.9:1, а надписи в плашках мелкие. */
   --accent-deep: #3a12c4;
@@ -509,9 +499,12 @@ h2 {
   gap: 4px;
   padding: 22px 24px;
   border-radius: var(--radius);
-  background: var(--accent-tint);
+  background: var(--card);
   color: var(--text);
-  border: 1px solid var(--accent-line-soft);
+  /* В покое плашка выглядит обычной карточкой: единственный признак того, что
+     она открывается, — уголок в заголовке. Рамка и подъём приходят под
+     курсором. */
+  border: 1px solid transparent;
   transition:
     transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
     box-shadow 0.22s ease,
@@ -1466,7 +1459,7 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
    под курсором. Плашки-не-ссылки («Средний чек», «Собираем в среднем») стоят
    неподвижно — по ним никуда не перейти, и обещать переход нечестно. */
 a.stat {
-  border: 1px solid var(--accent-line-soft);
+  border: 1px solid transparent;
   transition:
     transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
     box-shadow 0.22s ease,
@@ -1489,10 +1482,8 @@ a.stat:active { transform: translateY(-1px); transition-duration: 0.08s; }
   border: 1px solid var(--stat-border);
   border-radius: 14px;
 }
-/* Ссылки среди них отличаются рамкой: серая — просто число, сиреневая — можно
-   перейти. Правило идёт после общего, иначе серая рамка `.stats .stat`
-   перекрыла бы его по специфичности. */
-.stats a.stat { border-color: var(--accent-line-soft); background: var(--accent-tint); }
+/* Правило идёт после общего `.stats .stat`, иначе серая рамка перекрыла бы
+   сиреневую по специфичности. */
 .stats a.stat:hover { background: var(--stat-hover-bg); border-color: var(--accent-line); }
 
 .stat-title { font-size: 12px; color: var(--muted); }
@@ -1927,10 +1918,6 @@ a.stat:hover .stat-value { color: var(--accent); }
   --accent: #9b7dff;
   --accent-soft: #2a2350;
   --accent-line: #4b3a86;
-  --accent-line-soft: #332b52;
-  /* В темноте подложка почти не нужна — рамка и так светится, — но лёгкий
-     фиолетовый подмес держит плашки одинаковыми в обеих темах. */
-  --accent-tint: #1e1b26;
   --accent-deep: #cdbcff;
   --accent-gradient-solid: linear-gradient(90deg, #6b45ff 0%, #9b7dff 100%);
   --danger: #ff6b6b;

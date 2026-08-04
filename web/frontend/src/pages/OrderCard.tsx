@@ -295,20 +295,12 @@ export default function OrderCard() {
                   />
                 ) : null}
               </div>
-              {data.can_confirm || data.can_finish ? (
-                <p className="muted small hold-hint">
-                  Нажмите и удерживайте кнопку, пока полоса не заполнится.
-                </p>
-              ) : null}
 
               {/* Пока заказ не взят, поле накладной не показываем: отправку
                   подписывают именем, и заполнять номер, который всё равно не
                   сохранится, — зря. */}
               {data.can_ship && !order.assignee ? (
-                <p className="muted">
-                  Чтобы отметить отправку, сначала возьмите заказ в работу — имя вписывается
-                  вверху страницы.
-                </p>
+                <p className="muted">Сначала возьмите заказ в работу.</p>
               ) : data.can_ship ? (
                 <form className="form ttn" onSubmit={(event) => event.preventDefault()}>
                   {/* Отправка формы гасится и ничего не делает: Enter в поле
@@ -333,10 +325,6 @@ export default function OrderCard() {
                       disabled={shipAction.isPending}
                       onHoldComplete={() => shipAction.mutate({ url: url("ship"), data: { ttn } })}
                     />
-                    <span className="muted small">
-                      Отправку записываем на вас: {order.assignee}. Клиенту уйдёт сообщение с
-                      номером накладной.
-                    </span>
                   </div>
                 </form>
               ) : order.ttn ? (
@@ -346,10 +334,7 @@ export default function OrderCard() {
               {data.can_cancel ? (
                 <form className="form cancel" onSubmit={(event) => event.preventDefault()}>
                   <label>
-                    <span>
-                      Отмена — товар вернётся на склад. Причина останется в заказе, клиенту не
-                      уйдёт
-                    </span>
+                    <span>Причина отмены</span>
                     <input
                       type="text"
                       value={reason}

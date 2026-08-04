@@ -10,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { get } from "../api/client";
-import { Head, Loading, LoadError, Tag, stamp } from "../components/ui";
+import { Head, Loading, LoadError } from "../components/ui";
 import { usePageTitle } from "../lib/meta";
 
 type Metric = {
@@ -38,22 +38,11 @@ type ZeroStock = {
   category: string | null;
 };
 
-type RecentOrder = {
-  id: number;
-  name: string;
-  total_text: string;
-  status: string;
-  status_short: string;
-  created_at: string;
-  units_count: number;
-};
-
 type Dashboard = {
   shop_name: string;
   today: string;
   metrics: Metric[];
   attention: Attention[];
-  recent_orders: RecentOrder[];
   zero_stock: ZeroStock[];
   zero_stock_total: number;
   zero_stock_limit: number;
@@ -95,6 +84,10 @@ export default function Summary() {
       <div className="card">
         <h2>Требует внимания</h2>
         {data.attention.length ? (
+          /* Каждый пункт — плашка со «счётчиком» слева: цифра и есть ссылка,
+             по ней попадают в отфильтрованный список, не целясь в подпись.
+             Срочное отличается не только цветом цифры — у плашки свой фон,
+             чтобы «ждут проверки оплаты» находилось взглядом, а не чтением. */
           <ul className="attention">
             {data.attention.map((row) => (
               <li key={row.title} className={row.urgent ? "urgent" : ""}>
@@ -102,8 +95,10 @@ export default function Summary() {
                   {row.count}
                 </Link>
                 <span className="attention-main">
-                  <Link to={row.href}>{row.title}</Link>
-                  <span className="muted small">
+                  <Link className="attention-title" to={row.href}>
+                    {row.title}
+                  </Link>
+                  <span className="attention-hint">
                     {row.hint}
                     {row.link_hint ? ` · ${row.link_hint}` : ""}
                   </span>
@@ -113,35 +108,6 @@ export default function Summary() {
           </ul>
         ) : (
           <p className="muted">Всё разобрано: ни одного заказа, который ждёт человека.</p>
-        )}
-      </div>
-
-      {/* Правый столбец — лента сообщений: что пришло и что кончилось. Обе
-          части живут в одной колонке и читаются одинаково — строка-сообщение,
-          по которой можно перейти к делу. */}
-      <div className="feed-column">
-      <div className="card">
-        <h2>Новые заказы</h2>
-        {data.recent_orders.length ? (
-          <ul className="alerts">
-            {data.recent_orders.map((order) => (
-              <li key={order.id}>
-                <span className="alert-main">
-                  <Link className="strong" to={`/orders/${order.id}`}>
-                    №{order.id} · {order.name}
-                  </Link>
-                  <span className="muted small">
-                    {stamp(order.created_at)} · {order.total_text}
-                  </span>
-                </span>
-                <Tag kind={`st-${order.status}`}>{order.status_short}</Tag>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          /* Пусто — это не «нет заказов вообще», а «все разобраны»: закрытые и
-             отменённые в ленту не идут. */
-          <p className="muted">Новых заказов нет — всё разобрано.</p>
         )}
       </div>
 
@@ -187,7 +153,6 @@ export default function Summary() {
         ) : (
           <p className="muted">Пусто: у всех товаров на витрине что-то есть на складе.</p>
         )}
-      </div>
       </div>
       </div>
     </>

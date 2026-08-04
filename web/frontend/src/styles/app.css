@@ -479,6 +479,10 @@ h2 {
   margin-bottom: 22px;
 }
 
+/* Карточка приподнимается под курсором: она ссылка, а не просто цифра, и это
+   единственный способ показать разницу — подчёркивать заголовок внутри плашки
+   такого размера некрасиво. Кривая с «выбегом» (0.2, 0.8) не линейная нарочно:
+   так движение похоже на предмет, а не на переключение состояния. */
 .metric {
   display: flex;
   flex-direction: column;
@@ -487,8 +491,20 @@ h2 {
   border-radius: var(--radius);
   background: var(--card);
   color: var(--text);
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 0.22s ease,
+    background 0.2s ease;
 }
-.metric:hover { text-decoration: none; background: var(--row-hover); }
+.metric:hover {
+  text-decoration: none;
+  background: var(--row-hover);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-drop);
+}
+/* Нажатие возвращает плашку на место — короткая «отдача» вместо мгновенного
+   перехода на новый экран. */
+.metric:active { transform: translateY(-1px); transition-duration: 0.08s; }
 
 .metric-title { font-size: 13px; color: var(--muted); }
 .metric-value {
@@ -496,34 +512,92 @@ h2 {
   font-weight: 600;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  transition: color 0.2s ease;
 }
+.metric:hover .metric-value { color: var(--accent); }
 .metric-sub { font-size: 14px; }
 .metric-hint { font-size: 12px; color: var(--muted); }
 
 /* Список дел. Цифра слева крупная и сама по себе ссылка: по ней и попадают в
-   отфильтрованный список, не целясь в подпись. */
-.attention { list-style: none; margin: 0; padding: 0; }
+   отфильтрованный список, не целясь в подпись.
+
+   Пункты — плашки, а не строки, разделённые чертой. Каждая строка здесь
+   отдельное дело, и плашка это показывает честнее линейки: у списка из двух
+   пунктов не остаётся висящих разделителей, а срочное можно выделить фоном,
+   не подкрашивая одну цифру. */
+.attention { list-style: none; margin: 0; padding: 0;
+             display: flex; flex-direction: column; gap: 10px; }
 
 .attention li {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid transparent;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
-.attention li:last-child { border-bottom: none; }
+.attention li:hover {
+  background: var(--card);
+  border-color: var(--line);
+  transform: translateX(3px);
+}
 
+/* Цифра в жетоне: в ряду из трёх пунктов числа выстраиваются в столбик
+   одинаковой ширины, и «сколько всего ждёт» читается сверху вниз одним
+   взглядом. */
 .attention-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   min-width: 46px;
-  font-size: 22px;
+  height: 46px;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  font-size: 20px;
   font-weight: 600;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  transition: transform 0.2s ease, background 0.2s ease;
 }
-.attention-count:hover { text-decoration: none; opacity: 0.7; }
-.attention li.urgent .attention-count { color: var(--danger); }
+.attention-count:hover { text-decoration: none; transform: scale(1.06); }
 
-.attention-main { display: flex; flex-direction: column; gap: 2px; }
+/* Срочное — та же плашка в красноватом тоне. Цвет тут значащий: «клиент ждёт
+   ответа про деньги» отличается от «надо собрать посылку». */
+.attention li.urgent { background: var(--danger-soft); }
+.attention li.urgent:hover { background: var(--danger-soft); border-color: var(--danger); }
+.attention li.urgent .attention-count {
+  background: var(--card);
+  border-color: transparent;
+  color: var(--danger);
+}
+
+.attention-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.attention-title {
+  font-size: 15px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.attention-title:hover { text-decoration: none; color: var(--accent); }
+.attention-hint { font-size: 12.5px; color: var(--muted); line-height: 1.35; }
+
+/* Уголок справа: намёк, что плашка ведёт в список. Не иконка и не кнопка —
+   просто движение навстречу курсору. */
+.attention li::after {
+  content: "›";
+  flex: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--muted);
+  opacity: 0.5;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.attention li:hover::after { opacity: 1; transform: translateX(3px); }
 
 /* ─── Сводка: две колонки ───
    Слева заказы, ждущие человека, справа — склад. Колонки выровнены по верху
@@ -536,12 +610,6 @@ h2 {
   align-items: start;
 }
 .summary-grid > .card { margin-bottom: 0; }
-
-/* Правый столбец: карточки лентой, одна под другой. Обычный `margin-bottom`
-   карточек здесь не годится — зазор должен быть тот же, что между колонками,
-   иначе сетка выглядит перекошенной. */
-.feed-column { display: flex; flex-direction: column; gap: 16px; }
-.feed-column > .card { margin-bottom: 0; }
 
 @media (max-width: 900px) {
   .summary-grid { grid-template-columns: minmax(0, 1fr); }
@@ -1340,7 +1408,23 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
   background: var(--surface);
   color: var(--text);
 }
-a.stat:hover { background: var(--surface-hover); text-decoration: none; }
+/* Кликабельные плашки живут тем же движением, что и метрики «Сводки»: подъём
+   под курсором. Плашки-не-ссылки («Средний чек», «Собираем в среднем») стоят
+   неподвижно — по ним никуда не перейти, и обещать переход нечестно. */
+a.stat {
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 0.22s ease,
+    background 0.2s ease,
+    border-color 0.2s ease;
+}
+a.stat:hover {
+  background: var(--surface-hover);
+  text-decoration: none;
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-drop);
+}
+a.stat:active { transform: translateY(-1px); transition-duration: 0.08s; }
 
 /* В «Статистике» плашки белые с тонкой рамкой: карточка под ними тоже белая,
    и серая заливка на светлом фоне раздела выглядела бы грязным пятном. */
@@ -1352,7 +1436,13 @@ a.stat:hover { background: var(--surface-hover); text-decoration: none; }
 .stats a.stat:hover { background: var(--stat-hover-bg); border-color: var(--stat-hover-border); }
 
 .stat-title { font-size: 12px; color: var(--muted); }
-.stat-value { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.stat-value {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  transition: color 0.2s ease;
+}
+a.stat:hover .stat-value { color: var(--accent); }
 .stat-sub { font-size: 12px; color: var(--muted); }
 
 /* ─── График выручки ─── */
@@ -1890,4 +1980,27 @@ a.stat:hover { background: var(--surface-hover); text-decoration: none; }
   --color-chart-scale-04: var(--chart-scale-04);
   --color-chart-scale-05: var(--chart-scale-05);
   --color-chart-scale-pattern-color: var(--chart-scale-pattern-color);
+}
+
+/* ─── Движение ───
+   В системе можно попросить «поменьше анимации» — обычно это делают те, кому
+   от движения на экране физически нехорошо. Убираем сдвиги и переходы целиком,
+   оставляя все цвета и подсветки: подсказка «сюда можно нажать» никуда не
+   девается, исчезает только движение. */
+@media (prefers-reduced-motion: reduce) {
+  .metric,
+  .metric:hover,
+  .metric:active,
+  a.stat,
+  a.stat:hover,
+  a.stat:active,
+  .attention li,
+  .attention li:hover,
+  .attention-count,
+  .attention-count:hover,
+  .attention li::after,
+  .attention li:hover::after {
+    transform: none;
+    transition: none;
+  }
 }

@@ -27,6 +27,10 @@
   --muted: #86868b;
   --accent: #5227ff;
   --accent-soft: #efeaff;
+  /* Обводка плашки, по которой можно перейти. Разбавленный акцент, а не он
+     сам: рамка идёт по всему периметру, и полная насыщенность на белой
+     карточке читается как ошибка, а не как «сюда можно нажать». */
+  --accent-line: #c9b8ff;
   /* Тёмный конец палитры — для текста на светлой подложке: сам акцент на
      `--accent-soft` даёт всего 4.9:1, а надписи в плашках мелкие. */
   --accent-deep: #3a12c4;
@@ -497,14 +501,17 @@ h2 {
   border-radius: var(--radius);
   background: var(--card);
   color: var(--text);
+  border: 1px solid transparent;
   transition:
     transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
     box-shadow 0.22s ease,
+    border-color 0.2s ease,
     background 0.2s ease;
 }
 .metric:hover {
   text-decoration: none;
   background: var(--row-hover);
+  border-color: var(--accent-line);
   transform: translateY(-3px);
   box-shadow: var(--shadow-drop);
 }
@@ -523,6 +530,35 @@ h2 {
 .metric:hover .metric-value { color: var(--accent); }
 .metric-sub { font-size: 14px; }
 .metric-hint { font-size: 12px; color: var(--muted); }
+
+/* ─── Признак «сюда можно нажать» ───
+   Уголок в строке заголовка, приглушённый и видимый всегда: подъём под
+   курсором сообщает о переходе только тому, кто уже навёл мышь, а знать это
+   надо заранее — иначе цифры на экране выглядят просто цифрами. Стоит в углу
+   плашки, у правого края, и одинаково в «Сводке» и «Статистике». */
+.metric-title,
+a.stat .stat-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.metric-title::after,
+a.stat .stat-title::after {
+  content: "›";
+  flex: none;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--muted);
+  opacity: 0.5;
+  transition: transform 0.2s ease, opacity 0.2s ease, color 0.2s ease;
+}
+.metric:hover .metric-title::after,
+a.stat:hover .stat-title::after {
+  opacity: 1;
+  color: var(--accent);
+  transform: translateX(3px);
+}
 
 /* Список дел. Цифра слева крупная и сама по себе ссылка: по ней и попадают в
    отфильтрованный список, не целясь в подпись.
@@ -1418,6 +1454,7 @@ h1 .tag { vertical-align: 6px; margin-left: 8px; font-size: 13px; }
    под курсором. Плашки-не-ссылки («Средний чек», «Собираем в среднем») стоят
    неподвижно — по ним никуда не перейти, и обещать переход нечестно. */
 a.stat {
+  border: 1px solid transparent;
   transition:
     transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
     box-shadow 0.22s ease,
@@ -1426,6 +1463,7 @@ a.stat {
 }
 a.stat:hover {
   background: var(--surface-hover);
+  border-color: var(--accent-line);
   text-decoration: none;
   transform: translateY(-3px);
   box-shadow: var(--shadow-drop);
@@ -1439,7 +1477,7 @@ a.stat:active { transform: translateY(-1px); transition-duration: 0.08s; }
   border: 1px solid var(--stat-border);
   border-radius: 14px;
 }
-.stats a.stat:hover { background: var(--stat-hover-bg); border-color: var(--stat-hover-border); }
+.stats a.stat:hover { background: var(--stat-hover-bg); border-color: var(--accent-line); }
 
 .stat-title { font-size: 12px; color: var(--muted); }
 .stat-value {
@@ -1872,6 +1910,7 @@ a.stat:hover .stat-value { color: var(--accent); }
      чернильное пятно. */
   --accent: #9b7dff;
   --accent-soft: #2a2350;
+  --accent-line: #4b3a86;
   --accent-deep: #cdbcff;
   --accent-gradient-solid: linear-gradient(90deg, #6b45ff 0%, #9b7dff 100%);
   --danger: #ff6b6b;
@@ -2016,7 +2055,11 @@ a.stat:hover .stat-value { color: var(--accent); }
   .attention-count,
   .attention-count:hover,
   .attention li::after,
-  .attention li:hover::after {
+  .attention li:hover::after,
+  .metric-title::after,
+  .metric:hover .metric-title::after,
+  a.stat .stat-title::after,
+  a.stat:hover .stat-title::after {
     transform: none;
     transition: none;
   }

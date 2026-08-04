@@ -10,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { get } from "../api/client";
-import { Head, Loading, LoadError } from "../components/ui";
+import { Head, Loading, LoadError, Tag, stamp } from "../components/ui";
 import { usePageTitle } from "../lib/meta";
 
 type Metric = {
@@ -38,11 +38,22 @@ type ZeroStock = {
   category: string | null;
 };
 
+type RecentOrder = {
+  id: number;
+  name: string;
+  total_text: string;
+  status: string;
+  status_short: string;
+  created_at: string;
+  units_count: number;
+};
+
 type Dashboard = {
   shop_name: string;
   today: string;
   metrics: Metric[];
   attention: Attention[];
+  recent_orders: RecentOrder[];
   zero_stock: ZeroStock[];
   zero_stock_total: number;
   zero_stock_limit: number;
@@ -76,6 +87,11 @@ export default function Summary() {
         ))}
       </div>
 
+      {/* Две колонки: слева то, что делают руками (заказы, ждущие человека),
+          справа — лента складских сообщений. Разделение по смыслу, а не ради
+          вида: слева работа с клиентами, справа работа с товаром, и одно не
+          должно оттеснять другое вниз страницы. */}
+      <div className="summary-grid">
       <div className="card">
         <h2>Требует внимания</h2>
         {data.attention.length ? (
@@ -100,22 +116,60 @@ export default function Summary() {
         )}
       </div>
 
+      {/* Правый столбец — лента сообщений: что пришло и что кончилось. Обе
+          части живут в одной колонке и читаются одинаково — строка-сообщение,
+          по которой можно перейти к делу. */}
+      <div className="feed-column">
       <div className="card">
-        <h2>Закончилось на складе</h2>
+        <h2>Новые заказы</h2>
+        {data.recent_orders.length ? (
+          <ul className="alerts">
+            {data.recent_orders.map((order) => (
+              <li key={order.id}>
+                <span className="alert-main">
+                  <Link className="strong" to={`/orders/${order.id}`}>
+                    №{order.id} · {order.name}
+                  </Link>
+                  <span className="muted small">
+                    {stamp(order.created_at)} · {order.total_text}
+                  </span>
+                </span>
+                <Tag kind={`st-${order.status}`}>{order.status_short}</Tag>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          /* Пусто — это не «нет заказов вообще», а «все разобраны»: закрытые и
+             отменённые в ленту не идут. */
+          <p className="muted">Новых заказов нет — всё разобрано.</p>
+        )}
+      </div>
+
+      {/* Складские сообщения. Каждая строка — отдельное «закончился такой-то
+          размер», а не строчка таблицы: так это и читают — как уведомления,
+          которые надо разобрать. Размер стоит на видном месте, потому что
+          пополняют именно его, а не товар целиком. */}
+      <div className="card stock-feed">
+        <h2>
+          Закончилось на складе
+          {data.zero_stock_total ? <span className="badge">{data.zero_stock_total}</span> : null}
+        </h2>
         {data.zero_stock.length ? (
           <>
-            <p className="muted small">
-              Размеры, которые разобрали: продавались и кончились. Тех, что просто не
-              завозили, здесь нет — все остатки видно во вкладке «Остатки».
-            </p>
-            <ul className="zero-stock">
+            <ul className="alerts">
               {data.zero_stock.map((row) => (
                 <li key={`${row.product_id}-${row.variant}`}>
-                  <Link to={`/products/${row.product_id}`}>{row.title}</Link>
-                  <span className="muted small">
-                    {row.variant || "без вариантов"}
-                    {row.category ? ` · ${row.category}` : ""}
+                  <span className="alert-main">
+                    <Link className="strong" to={`/products/${row.product_id}`}>
+                      {row.title}
+                    </Link>
+                    {/* Коротко: в узкой колонке длинная подпись переносится на
+                        вторую строку и ломает ровный ряд плашек с размерами. */}
+                    <span className="muted small">
+                      {row.category ? `${row.category} · ` : ""}нужно пополнить
+                    </span>
                   </span>
+                  <span className="alert-size">{row.variant || "один вариант"}</span>
                 </li>
               ))}
             </ul>
@@ -133,6 +187,8 @@ export default function Summary() {
         ) : (
           <p className="muted">Пусто: у всех товаров на витрине что-то есть на складе.</p>
         )}
+      </div>
+      </div>
       </div>
     </>
   );

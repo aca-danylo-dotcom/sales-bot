@@ -294,8 +294,12 @@ a:hover { text-decoration: underline; }
   left: 50%;
   padding: 3px 9px;
   border-radius: 8px;
-  background: var(--text);
-  color: #fff;
+  /* Не `--text` с белой надписью: в тёмной теме цвет текста сам светлый, и
+     подсказка превращалась в белый прямоугольник с белыми же буквами. Пара
+     `--solid` / `--on-solid` переворачивается вместе с темой — светлая плашка
+     с тёмной надписью в темноте, тёмная со светлой днём. */
+  background: var(--solid);
+  color: var(--on-solid);
   font-size: 12px;
   line-height: 1.4;
   white-space: nowrap;
@@ -520,6 +524,67 @@ h2 {
 .attention li.urgent .attention-count { color: var(--danger); }
 
 .attention-main { display: flex; flex-direction: column; gap: 2px; }
+
+/* ─── Сводка: две колонки ───
+   Слева заказы, ждущие человека, справа — склад. Колонки выровнены по верху
+   (`start`), а не растянуты: списки в них разной длины, и тянуть короткий до
+   высоты длинного значит рисовать пустую карточку в пол-экрана. */
+.summary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.summary-grid > .card { margin-bottom: 0; }
+
+/* Правый столбец: карточки лентой, одна под другой. Обычный `margin-bottom`
+   карточек здесь не годится — зазор должен быть тот же, что между колонками,
+   иначе сетка выглядит перекошенной. */
+.feed-column { display: flex; flex-direction: column; gap: 16px; }
+.feed-column > .card { margin-bottom: 0; }
+
+@media (max-width: 900px) {
+  .summary-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Счётчик у заголовка: сколько всего размеров кончилось. Стоит здесь, а не в
+   строке под ним, потому что это первое, на что смотрят, — «много ли». */
+.stock-feed h2 { display: flex; align-items: center; gap: 10px; }
+.stock-feed .badge {
+  padding: 1px 9px;
+  border-radius: 980px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Лента складских сообщений: каждая строка — одно «кончился такой-то размер».
+   Размер вынесен вправо на отдельную плашку: пополняют именно его, и в списке
+   из восьми строк глаз должен находить его сразу, не вычитывая название. */
+.alerts { list-style: none; margin: 0 0 16px; padding: 0;
+          display: flex; flex-direction: column; gap: 8px; }
+.alerts li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+}
+.alert-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.alert-main .strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alert-size {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 980px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
 
 .zero-stock { list-style: none; margin: 14px 0 18px; padding: 0; }
 

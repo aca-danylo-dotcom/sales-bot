@@ -5,8 +5,8 @@
  * в один, и стили для них уже описаны в styles/app.css. Поэтому компоненты
  * почти ничего не решают сами — они лишь избавляют от повторения разметки.
  */
-import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import type { MouseEvent, ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 /** Заголовок раздела и подпись под ним. */
 export function Head({
@@ -126,4 +126,38 @@ export function Problems({ items, title = "Не сохранил:" }: { items: s
 /** Первые 16 символов даты из базы: «2026-07-31 14:05». */
 export function stamp(value?: string | null): string {
   return value ? value.slice(0, 16) : "—";
+}
+
+/**
+ * Строка таблицы, которая открывается вся целиком.
+ *
+ * Целиться в название товара или в номер заказа — работа, которой быть не
+ * должно: строка и так про один заказ, значит нажимать можно куда угодно
+ * в её пределах.
+ *
+ * Ссылка в первой ячейке при этом ОСТАЁТСЯ, и не для красоты: это
+ * единственный способ открыть заказ в новой вкладке средней кнопкой,
+ * скопировать адрес и пройти по списку с клавиатуры. Строка сама по себе
+ * ничего этого не умеет — она лишь расширяет область нажатия.
+ *
+ * Два случая, когда нажатие не считается переходом:
+ *
+ * 1. Нажали по ссылке или другому управлению внутри строки — там своё
+ *    действие, и подменять его переходом в карточку нельзя.
+ * 2. В строке что-то выделено мышью. Копирование телефона протяжкой — обычное
+ *    дело, и прыгать из-за него на другую страницу значит терять выделенное.
+ */
+export function useRowLink() {
+  const navigate = useNavigate();
+
+  return (to: string) => ({
+    className: "row-link",
+    onClick: (event: MouseEvent<HTMLTableRowElement>) => {
+      if ((event.target as HTMLElement).closest("a, button, input, label, select, textarea")) {
+        return;
+      }
+      if (window.getSelection()?.toString()) return;
+      navigate(to);
+    },
+  });
 }

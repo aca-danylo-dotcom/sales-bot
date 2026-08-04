@@ -72,10 +72,7 @@ export default function Stock() {
 
   return (
     <>
-      <Head
-        title="Товары"
-        lead="Все размеры и цвета одной таблицей: правьте сколько нужно и сохраните разом."
-      >
+      <Head title="Товары">
         <Link className="btn primary" to="/products/new">
           Новый товар
         </Link>

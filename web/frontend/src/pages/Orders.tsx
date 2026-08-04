@@ -11,7 +11,16 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { get, query as buildQuery } from "../api/client";
-import { EmptyState, Head, Loading, LoadError, Pager, Tag, stamp } from "../components/ui";
+import {
+  EmptyState,
+  Head,
+  Loading,
+  LoadError,
+  Pager,
+  Tag,
+  stamp,
+  useRowLink,
+} from "../components/ui";
 import { usePageTitle } from "../lib/meta";
 
 type Row = {
@@ -54,6 +63,7 @@ export default function Orders() {
   const [params, setParams] = useSearchParams();
   const filters = readFilters(params);
   const page = Number(params.get("page")) || 1;
+  const rowLink = useRowLink();
 
   // Поля ввода — своё состояние: список перечитывается по кнопке «Показать»,
   // а не на каждую букву. Возврат «назад» меняет адрес, поэтому поля
@@ -157,7 +167,12 @@ export default function Orders() {
               </thead>
               <tbody>
                 {data.orders.map((order) => (
-                  <tr key={order.id}>
+                  <tr
+                    key={order.id}
+                    {...rowLink(
+                      `/orders/${order.id}${buildQuery({ ...filters, page: page > 1 ? page : "" })}`,
+                    )}
+                  >
                     <td>
                       {/* Фильтры едут в карточку, чтобы «← Все заказы» вернул
                           в тот же список, а не в начало. */}

@@ -12,7 +12,15 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { get, query as buildQuery } from "../api/client";
 import { ProductFilters } from "../components/product-filters";
-import { EmptyState, Head, Loading, LoadError, Pager, Tag } from "../components/ui";
+import {
+  EmptyState,
+  Head,
+  Loading,
+  LoadError,
+  Pager,
+  Tag,
+  useRowLink,
+} from "../components/ui";
 import { usePageTitle } from "../lib/meta";
 
 type Row = {
@@ -53,6 +61,7 @@ export default function Products() {
   const [params, setParams] = useSearchParams();
   const filters = readFilters(params);
   const page = Number(params.get("page")) || 1;
+  const rowLink = useRowLink();
 
   const [draft, setDraft] = useState(filters);
   useEffect(() => {
@@ -123,7 +132,7 @@ export default function Products() {
               </thead>
               <tbody>
                 {data.products.map((product) => (
-                  <tr key={product.id}>
+                  <tr key={product.id} {...rowLink(`/products/${product.id}${filtersQs}`)}>
                     <td className="thumb-col">
                       {product.main_photo_id ? (
                         <img

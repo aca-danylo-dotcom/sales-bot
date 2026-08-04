@@ -837,6 +837,11 @@ input[type="file"]:hover { border-color: var(--line-hover); }
 .data-grid tbody tr:last-child td { border-bottom: none; }
 .data-grid tbody tr:hover { background: var(--row-hover); }
 
+/* Строка, открывающаяся вся целиком (см. components/ui.tsx::useRowLink).
+   Курсор-палец — единственный признак, по которому это видно заранее: подсветка
+   при наведении есть и у обычных строк. */
+.data-grid tbody tr.row-link { cursor: pointer; }
+
 .data-grid .num { text-align: right; white-space: nowrap; }
 /* Явно и для шапки: без этого «ШТУК» и «ВЫРУЧКА» прижимаются к левому краю
    своей колонки, а числа под ними стоят у правого — подпись оказывается не над

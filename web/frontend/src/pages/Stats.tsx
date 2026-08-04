@@ -148,9 +148,13 @@ const PRESETS = [
   { days: 90, title: "90 дней" },
 ];
 
+/* Считаем и печатаем дату в UTC от начала до конца. Смешивать нельзя: местная
+   полночь в Киеве — это 21:00 предыдущего дня по UTC, и `toISOString` отдавал
+   вчерашнее число. Из-за этого «7 дней» просило период с 28-го по 4-е — восемь
+   дней, — сервер честно отвечал `days: 8`, и ни одна кнопка не подсвечивалась. */
 function shiftDays(from: string, days: number) {
-  const date = new Date(`${from}T00:00:00`);
-  date.setDate(date.getDate() + days);
+  const date = new Date(`${from}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
 
@@ -180,9 +184,22 @@ export default function Stats() {
 
   const { sales, funnel, delivery, clients, products } = data;
 
+  const presetRange = (days: number) => ({ from: shiftDays(data.today, -(days - 1)), to: data.today });
+
   const applyPreset = (days: number) => {
-    const end = data.today;
-    setParams(new URLSearchParams(buildQuery({ from: shiftDays(end, -(days - 1)), to: end }).replace("?", "")));
+    setParams(new URLSearchParams(buildQuery(presetRange(days)).replace("?", "")));
+  };
+
+  /* Какая кнопка нажата, решает адрес, а не ответ сервера: пока новые числа
+     в пути, `keepPreviousData` держит прежние, и подсветка на секунду
+     оставалась бы на старом отрезке. Пустой адрес — первый заход, период
+     тогда выбрал сервер, и сверять остаётся только с ним.
+
+     Даты, набранные руками, не подсвечивают ничего — и правильно: кнопка
+     значит «последние N дней до сегодня», а не «отрезок такой длины». */
+  const isPresetOn = (days: number) => {
+    const range = presetRange(days);
+    return from || to ? from === range.from && to === range.to : data.days === days;
   };
 
   const ordersHref = (extra: Record<string, string> = {}) =>
@@ -221,7 +238,8 @@ export default function Stats() {
             <button
               key={preset.days}
               type="button"
-              className={`btn ${data.days === preset.days ? "on" : ""}`}
+              className={`btn ${isPresetOn(preset.days) ? "on" : ""}`}
+              aria-pressed={isPresetOn(preset.days)}
               onClick={() => applyPreset(preset.days)}
             >
               {preset.title}
@@ -498,10 +516,6 @@ export default function Stats() {
 
       <section className="card span-5">
         <h2><IconStock />Лежит без движения</h2>
-        <p className="muted small">
-          Товары на витрине, которые за период не купили ни разу. Те, у которых
-          просто кончился размер, сюда не попадают — их видно в «Остатках».
-        </p>
         {products.idle.length ? (
           /* С миниатюрами: товар узнают по картинке быстрее, чем по названию
              из восьми слов, а названия здесь именно такие. */

@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import re
+import secrets
+import sqlite3
 from datetime import timedelta
 from typing import Any, Iterable
 
@@ -51,14 +53,21 @@ async def update_client(
     city: str | None = None,
     np_branch: str | None = None,
     ig_user_id: str | None = None,
+    email: str | None = None,
 ) -> None:
-    """Обновляет профиль клиента. None означает «не трогать это поле»."""
+    """Обновляет профиль клиента. None означает «не трогать это поле».
+
+    Почта здесь особая: пустая строка — это осознанное «убрать почту» (клиент
+    попросил больше не писать), и она сюда доходит, потому что от «не трогать»
+    её отличает проверка на None, а не на пустоту.
+    """
     fields = {
         "name": name,
         "phone": phone,
         "city": city,
         "np_branch": np_branch,
         "ig_user_id": ig_user_id,
+        "email": email,
     }
     updates = {k: v for k, v in fields.items() if v is not None}
     if not updates:
@@ -984,6 +993,206 @@ async def mark_cart_reminded(client_id: int) -> None:
         await conn.commit()
 
 
+# ─────────────────────────── Промокоды ───────────────────────────
+
+# Из алфавита выкинуты 0/O и 1/I/L: код диктуют по телефону и переписывают
+# руками с экрана, и «ноль или буква О» — самая частая причина, по которой
+# рабочая скидка не срабатывает.
+_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+_CODE_LENGTH = 6
+
+# Тот же формат, что у config.now_str(): метки в базе сравниваются строками, и
+# срок годности кода обязан лежать в том же виде, что и «сейчас».
+_STAMP = "%Y-%m-%d %H:%M:%S"
+
+
+def _random_code() -> str:
+    # secrets, а не random: коды именные, но угадать чужой не должно быть можно
+    # даже теоретически — иначе скидку начнут подбирать перебором.
+    return "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
+
+
+def normalize_promo(text: str) -> str:
+    """Код к единому виду: заглавные, без пробелов и дефисов.
+
+    Человек присылает «скидка sale-7kf2 qx», и это тот же код. Приводить его к
+    виду базы должен код, а не клиент.
+    """
+    return "".join(ch for ch in (text or "").upper() if ch.isalnum())
+
+
+async def create_promo_code(
+    client_id: int, *, percent: int, ttl_days: int, reason: str = "cart"
+) -> dict | None:
+    """Выписывает клиенту новый одноразовый код. None — если percent нулевой.
+
+    Столкновение кодов ловится UNIQUE, а не проверкой перед вставкой: между
+    проверкой и вставкой всегда есть щель, а повторов при таком алфавите ждать
+    придётся долго — трёх попыток хватает с огромным запасом.
+    """
+    if percent <= 0:
+        return None
+
+    now = config.now_local()
+    expires = now + timedelta(days=ttl_days)
+    async with get_connection() as conn:
+        for _ in range(3):
+            code = _random_code()
+            try:
+                await conn.execute(
+                    """INSERT INTO promo_codes
+                           (code, client_id, percent, reason, created_at, expires_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (code, client_id, percent, reason,
+                     now.strftime(_STAMP), expires.strftime(_STAMP)),
+                )
+                await conn.commit()
+                return {
+                    "code": code,
+                    "percent": percent,
+                    "expires_at": expires.strftime(_STAMP),
+                    # Дата словами — для сообщения клиенту: «до 07.08».
+                    "expires_date": expires.strftime("%d.%m"),
+                }
+            except sqlite3.IntegrityError:
+                continue
+    return None
+
+
+async def activate_promo(client_id: int, code: str) -> tuple[str, dict | None]:
+    """Клиент прислал код в чат. Возвращает (результат, код).
+
+    Результаты: 'ok' — приняли; 'active' — этот же код уже был принят раньше;
+    'unknown' — такого кода нет ИЛИ он выписан другому человеку; 'expired' —
+    срок вышел; 'used' — код уже сгорел в заказе.
+
+    Чужой код и несуществующий отвечают одинаково намеренно: иначе по ответу
+    «этот код не ваш» можно перебором узнать, какие коды вообще существуют.
+    """
+    cleaned = normalize_promo(code)
+    if not cleaned:
+        return "unknown", None
+
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT * FROM promo_codes WHERE code = ?", (cleaned,)
+        )
+        row = await cursor.fetchone()
+        if not row or row["client_id"] != client_id:
+            return "unknown", None
+
+        promo = dict(row)
+        if promo["used_at"]:
+            return "used", promo
+        if promo["expires_at"] < config.now_str():
+            return "expired", promo
+        if promo["activated_at"]:
+            return "active", promo
+
+        await conn.execute(
+            "UPDATE promo_codes SET activated_at = ? WHERE id = ?",
+            (config.now_str(), promo["id"]),
+        )
+        await conn.commit()
+        return "ok", promo
+
+
+async def active_promo(client_id: int) -> dict | None:
+    """Код, который применится к следующему заказу этого клиента.
+
+    Если активных кодов почему-то несколько, берём тот, что сгорит раньше:
+    иначе у клиента остался бы на руках код, который он уже не успеет
+    потратить.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT * FROM promo_codes
+               WHERE client_id = ? AND activated_at IS NOT NULL
+                 AND used_at IS NULL AND expires_at >= ?
+               ORDER BY expires_at
+               LIMIT 1""",
+            (client_id, config.now_str()),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def get_client_promos(client_id: int, limit: int = 5) -> list[dict]:
+    """Последние коды клиента — для карточки в веб-CRM."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT * FROM promo_codes WHERE client_id = ?
+               ORDER BY id DESC LIMIT ?""",
+            (client_id, limit),
+        )
+        return _rows(await cursor.fetchall())
+
+
+# ───────────────────── Кому написать самим ─────────────────────
+
+
+async def get_sleeping_clients(
+    *, days: int, cooldown_days: int, limit: int
+) -> list[dict]:
+    """Кто говорил с ботом, но давно молчит и ничего не покупает.
+
+    Три условия, и каждое отсекает свой случай, когда письмо было бы лишним:
+
+    * разговор был, но давно — новичку, который написал час назад, напоминать
+      не о чем;
+    * ни одного заказа за это же время — человек, купивший вчера, не «уснул»;
+    * ему давно не писали мы сами (`outreach_at`) — иначе задача каждый день
+      слала бы одно и то же одному и тому же человеку.
+
+    Брошенные корзины сюда не попадают: по ним идёт своё напоминание, и два
+    письма об одном и том же выглядят как сбой.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT c.telegram_id AS client_id, c.name, c.email,
+                      MAX(m.created_at) AS last_seen
+               FROM clients c
+               JOIN conversations m ON m.client_id = c.telegram_id
+               WHERE (c.outreach_at IS NULL
+                      OR datetime(c.outreach_at) < datetime(?, ?))
+                 AND NOT EXISTS (
+                     SELECT 1 FROM orders o
+                     WHERE o.client_id = c.telegram_id
+                       AND datetime(o.created_at) >= datetime(?, ?)
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM carts ct
+                     JOIN cart_items ci ON ci.cart_id = ct.id
+                     WHERE ct.client_id = c.telegram_id
+                 )
+               GROUP BY c.telegram_id
+               HAVING datetime(last_seen) < datetime(?, ?)
+               ORDER BY last_seen
+               LIMIT ?""",
+            (
+                config.now_str(), f"-{cooldown_days} days",
+                config.now_str(), f"-{days} days",
+                config.now_str(), f"-{days} days",
+                limit,
+            ),
+        )
+        return _rows(await cursor.fetchall())
+
+
+async def mark_outreach(client_id: int) -> None:
+    """Отмечает, что мы написали клиенту сами.
+
+    Ставится ДО отправки и независимо от её успеха — как и метка о корзине:
+    недоставленное сообщение не повод писать снова через час.
+    """
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE clients SET outreach_at = ? WHERE telegram_id = ?",
+            (config.now_str(), client_id),
+        )
+        await conn.commit()
+
+
 # ─────────────────────────── Заказы ───────────────────────────
 
 
@@ -1042,15 +1251,38 @@ async def create_order(
                     await conn.rollback()
                     return "out_of_stock", None
 
-            total = round(sum(i["price"] * i["qty"] for i in items), 2)
+            full = round(sum(i["price"] * i["qty"] for i in items), 2)
+
+            # Промокод сгорает здесь, внутри той же транзакции, что и заказ.
+            # Иначе возможны обе беды сразу: заказ создан со скидкой, а код
+            # остался неиспользованным (скидка каждый раз), либо код погашен, а
+            # заказ не создался (скидка пропала ни за что).
+            cursor = await conn.execute(
+                """SELECT id, code, percent FROM promo_codes
+                   WHERE client_id = ? AND activated_at IS NOT NULL
+                     AND used_at IS NULL AND expires_at >= ?
+                   ORDER BY expires_at LIMIT 1""",
+                (client_id, now),
+            )
+            promo = await cursor.fetchone()
+            discount = round(full * promo["percent"] / 100, 2) if promo else 0.0
+            total = round(full - discount, 2)
+
             cursor = await conn.execute(
                 """INSERT INTO orders
-                       (client_id, status, total, channel, name, phone, city,
-                        np_branch, comment, created_at)
-                   VALUES (?, 'awaiting_payment', ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (client_id, total, channel, name, phone, city, np_branch, comment, now),
+                       (client_id, status, total, discount, promo_code, channel,
+                        name, phone, city, np_branch, comment, created_at)
+                   VALUES (?, 'awaiting_payment', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (client_id, total, discount, promo["code"] if promo else None,
+                 channel, name, phone, city, np_branch, comment, now),
             )
             order_id = cursor.lastrowid
+
+            if promo:
+                await conn.execute(
+                    "UPDATE promo_codes SET used_at = ?, order_id = ? WHERE id = ?",
+                    (now, order_id, promo["id"]),
+                )
 
             for item in items:
                 await conn.execute(

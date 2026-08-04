@@ -124,6 +124,46 @@ ORDER_PAYMENT_TIMEOUT_HOURS: int = int(os.getenv("ORDER_PAYMENT_TIMEOUT_HOURS", 
 # которого клиент блокирует бота.
 CART_REMINDER_HOURS: int = int(os.getenv("CART_REMINDER_HOURS", "6"))
 
+# --- Промокоды в напоминаниях ---
+# Скидка именная и одноразовая: код выписывается конкретному человеку вместе с
+# напоминанием и работает только у него (см. таблицу promo_codes).
+#
+# PROMO_PERCENT = 0 выключает промокоды целиком — напоминания тогда уходят без
+# скидки, просто «ваша корзина ждёт». Так и задумано: скидка стоит денег, и
+# владелец должен иметь возможность выключить её одной строкой, не трогая код.
+PROMO_PERCENT: int = max(0, min(int(os.getenv("PROMO_PERCENT", "5")), 90))
+# Сколько дней живёт код. Смысл срока — не в жадности, а в том, что скидка
+# работает только пока она повод вернуться сейчас.
+PROMO_TTL_DAYS: int = max(1, int(os.getenv("PROMO_TTL_DAYS", "3")))
+
+# --- Напоминания тем, кто давно не заходил ---
+# Второй повод написать: человек говорил с ботом, но ничего не купил. Пишем
+# один раз и с большой паузой — это граница между «напомнили» и «надоели».
+WINBACK_ENABLED: bool = os.getenv("WINBACK_ENABLED", "1").strip() not in ("", "0", "false")
+# Через сколько дней тишины считаем клиента «уснувшим».
+WINBACK_AFTER_DAYS: int = max(1, int(os.getenv("WINBACK_AFTER_DAYS", "14")))
+# Минимальная пауза между ЛЮБЫМИ нашими напоминаниями одному человеку.
+WINBACK_COOLDOWN_DAYS: int = max(1, int(os.getenv("WINBACK_COOLDOWN_DAYS", "30")))
+# Потолок на один проход задачи: рассылка не должна превращаться в веерную
+# отправку сотен сообщений за минуту — это верный способ получить бан у
+# Telegram и жалобы на спам.
+WINBACK_BATCH: int = max(1, int(os.getenv("WINBACK_BATCH", "20")))
+
+# --- Почта (SMTP) ---
+# Второй канал напоминаний. Адрес спрашивается у клиента ТОЛЬКО по желанию и
+# есть далеко не у всех — почта дополняет Telegram, а не заменяет его.
+# Пустой SMTP_HOST выключает отправку писем целиком (см. services/mail.py).
+SMTP_HOST: str = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER: str = os.getenv("SMTP_USER", "").strip()
+SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+# Отправитель: если не задан — берём логин, он почти всегда и есть адрес.
+SMTP_FROM: str = os.getenv("SMTP_FROM", "").strip() or SMTP_USER
+SMTP_FROM_NAME: str = os.getenv("SMTP_FROM_NAME", "").strip() or SHOP_NAME
+# 587 + STARTTLS — обычный вариант; 465 — сразу SSL. Определяем по порту, но
+# оставляем возможность задать явно.
+SMTP_SSL: bool = (os.getenv("SMTP_SSL", "").strip() or ("1" if SMTP_PORT == 465 else "0")) not in ("", "0", "false")
+
 # --- Веб-CRM ---
 # Панель работает БЕЗ входа: ни логина, ни пароля. Кто открыл адрес — тот внутри.
 # WEB_HOST по умолчанию слушает все интерфейсы, потому что хостингу иначе не

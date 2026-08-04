@@ -221,10 +221,16 @@ async def order_card(request: web.Request) -> web.Response:
         item["price_text"] = format.money(item["price_snapshot"])
         item["sum_text"] = format.money(item["sum"])
 
+    # Скидка по промокоду. `total` в базе уже со скидкой, поэтому без этой пары
+    # полей менеджер видит сумму, которая не сходится с ценами позиций, и идёт
+    # спрашивать, почему клиент недоплатил.
+    discount = order.get("discount") or 0
     payload = {
         "order": {
             **order,
             "total_text": format.money(order["total"]),
+            "discount_text": format.money(discount) if discount else "",
+            "full_text": format.money(round(order["total"] + discount, 2)) if discount else "",
             "status_short": SHORT_STATUS.get(order["status"], order["status"]),
             "status_name": ORDER_STATUS_RU.get(order["status"], order["status"]),
         },
@@ -254,6 +260,12 @@ async def order_card(request: web.Request) -> web.Response:
         # Менеджеру она видна затем, чтобы понять, почему бот советует именно
         # это, и вычистить факт, который бот понял не так.
         payload["client_notes"] = await queries.get_client_notes(order["client_id"])
+        # Почта (если клиент её оставил) и выписанные ему промокоды. Второе —
+        # чтобы на вопрос «мне обещали скидку» менеджер отвечал по факту, а не
+        # по памяти: видно и сам код, и сгорел ли он.
+        client = await queries.get_client(order["client_id"]) or {}
+        payload["client_email"] = client.get("email") or ""
+        payload["client_promos"] = await queries.get_client_promos(order["client_id"])
     return ok(payload)
 
 

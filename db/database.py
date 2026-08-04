@@ -78,8 +78,13 @@ CREATE TABLE IF NOT EXISTS clients (
     ig_user_id  TEXT,                           -- id в Instagram (появится с Direct)
     name        TEXT,                           -- имя (спрашиваем при оформлении)
     phone       TEXT,                           -- телефон (кнопка «Поделиться контактом»)
+    email       TEXT,                           -- почта — ТОЛЬКО по желанию клиента,
+                                                -- для напоминаний; пусто у большинства
     city        TEXT,                           -- город доставки
     np_branch   TEXT,                           -- отделение Новой Почты
+    outreach_at TEXT,                           -- когда последний раз писали сами
+                                                -- (напоминание, промокод) — держит
+                                                -- паузу между письмами
     created_at  TEXT    NOT NULL
 );
 
@@ -119,7 +124,9 @@ CREATE TABLE IF NOT EXISTS orders (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id    INTEGER NOT NULL REFERENCES clients(telegram_id) ON DELETE CASCADE,
     status       TEXT    NOT NULL DEFAULT 'awaiting_payment',
-    total        REAL    NOT NULL DEFAULT 0,
+    total        REAL    NOT NULL DEFAULT 0,      -- уже СО скидкой: это сумма к оплате
+    discount     REAL    NOT NULL DEFAULT 0,      -- сколько скинули по промокоду, грн
+    promo_code   TEXT,                            -- какой код сработал, для разбора
     channel      TEXT    NOT NULL DEFAULT 'telegram',
     name         TEXT,                          -- получатель: копия на момент заказа,
     phone        TEXT,                          -- чтобы правка профиля не переписывала
@@ -152,6 +159,37 @@ CREATE TABLE IF NOT EXISTS order_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+
+-- === Промокоды ===
+-- Код именной и одноразовый: он выписывается конкретному человеку в конкретном
+-- напоминании («корзина ждёт», «давно не заходили») и работает только у него.
+-- Общих кодов на всех тут нет намеренно — такой код за день расходится по
+-- форумам скидок, и магазин раздаёт скидку тем, кто и так купил бы.
+--
+-- Жизнь кода: выписан → (клиент прислал его в чат) activated_at → (оформлен
+-- заказ) used_at + order_id. Разделение на «активирован» и «использован» нужно
+-- ради простого правила: скидка считается один раз, в момент создания заказа, а
+-- не при каждом просмотре корзины, — иначе итог в корзине и в счёте разъезжались
+-- бы, и объяснить это клиенту было бы нечем.
+--
+-- Размер скидки хранится в самом коде, а не берётся из настроек при оформлении:
+-- владелец может поменять PROMO_PERCENT завтра, а обещание, отправленное
+-- человеку сегодня, менять задним числом нельзя.
+
+CREATE TABLE IF NOT EXISTS promo_codes (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    code         TEXT    NOT NULL UNIQUE,
+    client_id    INTEGER NOT NULL REFERENCES clients(telegram_id) ON DELETE CASCADE,
+    percent      INTEGER NOT NULL,
+    reason       TEXT    NOT NULL DEFAULT 'cart',  -- cart / sleeping: за что выписан
+    created_at   TEXT    NOT NULL,
+    expires_at   TEXT    NOT NULL,
+    activated_at TEXT,                             -- клиент прислал код в чат
+    used_at      TEXT,                             -- код сгорел в заказе
+    order_id     INTEGER REFERENCES orders(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_promo_client ON promo_codes(client_id);
 
 -- === История диалога ===
 -- В БД, а не в памяти процесса: после рестарта бот помнит разговор, и менеджер
@@ -237,6 +275,12 @@ CREATE INDEX IF NOT EXISTS idx_ai_usage_day ON ai_usage(day);
 _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("carts", "reminded_at", "TEXT"),
     ("product_photos", "content_hash", "TEXT"),
+    ("clients", "email", "TEXT"),
+    ("clients", "outreach_at", "TEXT"),
+    # NOT NULL здесь поставить нельзя (см. правило выше), поэтому скидка в старых
+    # заказах будет NULL — везде, где её читают, стоит COALESCE(discount, 0).
+    ("orders", "discount", "REAL DEFAULT 0"),
+    ("orders", "promo_code", "TEXT"),
 ]
 
 

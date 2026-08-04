@@ -47,6 +47,9 @@ export function RevenueBars({ data, totals }: Props) {
   if (data.length === 0) return null;
 
   const total = { revenue: totals.revenue_text, orders: String(totals.orders) };
+  // Граница «месяц» взята по столбикам, а не по ширине экрана: тридцать одна
+  // подпись под углом 45° ещё читается на любой карточке, дальше — нет.
+  const dense = data.length > 31;
 
   return (
     <div className="chart-card">
@@ -75,6 +78,12 @@ export function RevenueBars({ data, totals }: Props) {
         </div>
       </div>
 
+      {/* На телефоне график прокручивается вбок, а не сжимается. Тридцать дат
+          на четырёхсот пикселях превращаются в частокол из штрихов — читать
+          там нечего, а подписан каждый день ровно затем, чтобы его можно было
+          прочесть. Ширину задаём из числа столбиков: пока места хватает,
+          `min-width` меньше ширины карточки и прокрутки нет вовсе. */}
+      <div className="chart-scroll" style={{ ["--chart-min" as string]: `${data.length * 26}px` }}>
       <ChartContainer className="chart-area aspect-auto h-[250px] w-full" config={config}>
         <BarChart accessibilityLayer data={data} margin={{ left: 12, right: 12 }}>
           {/* Градиент палитры на весь график, а не на каждый столбик: единицы
@@ -92,14 +101,26 @@ export function RevenueBars({ data, totals }: Props) {
 
           <CartesianGrid vertical={false} />
 
-          {/* minTickGap прореживает даты сам: на широкой карточке подписей
-              больше, на телефоне меньше, склеиться в кашу они не могут. */}
+          {/* Подписана КАЖДАЯ дата (`interval={0}`), а не каждая третья: по
+              графику ищут конкретный день, и «что это за столбик между 20.07 и
+              23.07» — вопрос, на который подпись обязана отвечать сама.
+
+              Ровно поэтому подписи наклонены: горизонтально пять знаков даты
+              занимают втрое больше места, чем ширина столбика на месяце. До
+              месяца хватает поворота на 45°, дальше строки ставятся почти
+              вертикально — только так девяносто дат не наезжают друг на друга.
+              Высота оси и отступ снизу считаются от угла: наклонная подпись
+              «свисает» вниз, и на графике под неё нужно место. */}
           <XAxis
             dataKey="label"
             tickLine={false}
             axisLine={false}
-            tickMargin={8}
-            minTickGap={32}
+            interval={0}
+            angle={dense ? -80 : -45}
+            textAnchor="end"
+            height={dense ? 56 : 46}
+            tickMargin={dense ? 6 : 8}
+            tick={{ fontSize: dense ? 10 : 11 }}
           />
 
           <ChartTooltip
@@ -132,6 +153,7 @@ export function RevenueBars({ data, totals }: Props) {
           <Bar dataKey={active} fill="url(#bars-accent)" isAnimationActive={false} />
         </BarChart>
       </ChartContainer>
+      </div>
     </div>
   );
 }

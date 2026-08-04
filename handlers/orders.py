@@ -63,7 +63,7 @@ from keyboards.orders import (
     summary_kb,
     variants_pick_kb,
 )
-from services import agent_stats
+from services import agent_stats, mail
 from services.format import ORDER_STATUS_RU, looks_like_name, money, variant_label
 
 logger = logging.getLogger(__name__)
@@ -82,6 +82,7 @@ _LIMITS = {
     "city": (2, 60),
     "np_branch": (1, 100),
     "comment": (0, 300),
+    "email": (0, 120),
 }
 
 _MAX_ORDERS_SHOWN = 5
@@ -137,6 +138,7 @@ class Checkout(StatesGroup):
     city = State()
     np_branch = State()
     comment = State()
+    email = State()
     confirm = State()
 
 
@@ -146,6 +148,7 @@ _STATE_BY_FIELD = {
     "city": Checkout.city,
     "np_branch": Checkout.np_branch,
     "comment": Checkout.comment,
+    "email": Checkout.email,
 }
 
 _NEXT_FIELD = {
@@ -153,7 +156,8 @@ _NEXT_FIELD = {
     "phone": "city",
     "city": "np_branch",
     "np_branch": "comment",
-    "comment": None,      # дальше — сводка заказа
+    "comment": "email",
+    "email": None,        # дальше — сводка заказа
 }
 
 _PROMPTS = {
@@ -164,7 +168,17 @@ _PROMPTS = {
     "np_branch": ("Номер отделения Новой Почты — например «12» или «Поштомат 4521».\n"
                   "Можно дописать улицу, но номер нужен обязательно."),
     "comment": "Комментарий к заказу — если есть. Или нажмите «Пропустить».",
+    # Почта — единственный необязательный контакт, и сказано об этом прямо.
+    # Доставку она ни на что не меняет: адрес и телефон уже собраны выше, а
+    # заказ ведётся здесь, в чате. Нужна она только для напоминаний, и человек
+    # должен видеть, что «Пропустить» — нормальный ответ, а не отказ от заказа.
+    "email": ("Почта — если хотите получать напоминания и промокоды ещё и на неё.\n"
+              "Это по желанию: нажмите «Пропустить», и всё останется здесь, в чате."),
 }
+
+# Шаги, которые можно пропустить кнопкой. Комментарий к заказу и почта — оба
+# необязательные, и оба не мешают собрать посылку.
+_SKIPPABLE = ("comment", "email")
 
 # Поля, которые бот мог узнать раньше: их подставляем кнопкой «Оставить».
 # Телефон сюда тоже входит — он остаётся с прошлого заказа.
@@ -245,10 +259,24 @@ def client_cancelled_text(order: dict) -> str:
     )
 
 
+def _discount_line(order: dict) -> str:
+    """Строка про сработавшую скидку — пустая, если промокода не было.
+
+    Показывать её обязательно: `orders.total` уже со скидкой, и без пояснения
+    сумма к оплате просто не сходится с ценами позиций выше.
+    """
+    discount = order.get("discount") or 0
+    if not discount:
+        return ""
+    code = order.get("promo_code") or ""
+    return f"Скидка по промокоду {_esc(code)}: −{money(discount)}\n"
+
+
 def payment_text(order: dict) -> str:
     """Реквизиты для оплаты. Берутся из config и в промпт ИИ не попадают."""
     return (
         f"<b>Заказ №{order['id']} оформлен.</b>\n\n"
+        f"{_discount_line(order)}"
         f"К оплате: <b>{money(order['total'])}</b>\n\n"
         f"Карта: <code>{_esc(config.PAYMENT_CARD)}</code>\n"
         f"Получатель: {_esc(config.PAYMENT_CARD_HOLDER)}\n\n"
@@ -273,6 +301,10 @@ def admin_order_text(order: dict, username: str | None = None) -> str:
         "",
         order_items_text(order),
         "",
+        # Скидка отдельной строкой: владелец сверяет поступление на карту с
+        # суммой заказа, и «пришло меньше» должно объясняться прямо здесь.
+        *( [f"Скидка по промокоду {_esc(order.get('promo_code') or '')}: "
+            f"−{money(order.get('discount') or 0)}"] if order.get("discount") else []),
         f"<b>Сумма: {money(order['total'])}</b>",
         "",
         f"Получатель: {_esc(order['name'])}",
@@ -285,20 +317,39 @@ def admin_order_text(order: dict, username: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def _summary_text(cart: dict, data: dict, *, tail: str = "") -> str:
+def _summary_text(cart: dict, data: dict, *, tail: str = "",
+                  promo: dict | None = None) -> str:
     """Заказ целиком: состав, сумма, куда и кому везём.
 
     Один и тот же текст показывается в конце формы и вместо неё — постоянному
     покупателю с прошлыми данными. Меняется только последняя строка: в форме
     остаётся подтвердить, а на повторном заказе — решить, менять ли данные.
+
+    Скидка показывается ЗДЕСЬ же, а не только в счёте: человек с промокодом
+    ищет глазами, применился он или нет, и «узнаете после оформления» — худший
+    из возможных ответов.
     """
     lines = ["<b>Проверьте заказ</b>", ""]
     for number, item in enumerate(cart["items"], 1):
         lines.append(f"{number}. {_esc(item['title'])} — {_esc(variant_label(item))}")
         lines.append(f"    {item['qty']} × {money(item['price'])} = {money(item['sum'])}")
+
+    if promo:
+        # Считаем ровно так же, как queries.create_order, — иначе обещанная
+        # здесь сумма разойдётся со счётом на копейку, и объяснить это нечем.
+        discount = round(cart["total"] * promo["percent"] / 100, 2)
+        lines += [
+            "",
+            f"Сумма: {money(cart['total'])}",
+            f"Промокод {_esc(promo['code'])} (−{promo['percent']}%): −{money(discount)}",
+        ]
+        total_text = money(round(cart["total"] - discount, 2))
+    else:
+        total_text = money(cart["total"])
+
     lines += [
         "",
-        f"<b>Итого: {money(cart['total'])}</b>",
+        f"<b>Итого: {total_text}</b>",
         "",
         f"Получатель: {_esc(data.get('name', ''))}",
         f"Телефон: {_esc(data.get('phone', ''))}",
@@ -522,7 +573,7 @@ async def _ask(message: Message, state: FSMContext, field: str) -> None:
     data = await state.get_data()
     keep = (data.get("profile") or {}).get(field) if field in _PROFILE_FIELDS else None
 
-    markup = step_kb(keep, skip=(field == "comment"))
+    markup = step_kb(keep, skip=(field in _SKIPPABLE))
     if field == "phone":
         # Нижнюю клавиатуру и inline-кнопки одним сообщением не отправить —
         # шлём двумя: сначала кнопка контакта, следом «Оставить»/«Отменить».
@@ -545,8 +596,11 @@ async def _show_summary(message: Message, state: FSMContext) -> None:
 
     await state.set_state(Checkout.confirm)
     data = await state.get_data()
+    promo = await queries.active_promo(message.chat.id)
     await message.answer(
-        _summary_text(cart, data), reply_markup=summary_kb(), parse_mode=_HTML
+        _summary_text(cart, data, promo=promo),
+        reply_markup=summary_kb(),
+        parse_mode=_HTML,
     )
 
 
@@ -627,7 +681,8 @@ async def _start_checkout(message: Message, state: FSMContext, client_id: int,
         await state.set_state(Checkout.saved)
         await state.update_data(**profile)
         await message.answer(
-            _summary_text(cart, profile, tail=_SAVED_TAIL),
+            _summary_text(cart, profile, tail=_SAVED_TAIL,
+                          promo=await queries.active_promo(client_id)),
             reply_markup=saved_data_kb(),
             parse_mode=_HTML,
         )
@@ -716,10 +771,15 @@ async def step_keep(callback: CallbackQuery, state: FSMContext) -> None:
     await _accept(callback.message, state, field, value)
 
 
-@router.callback_query(Checkout.comment, F.data == CB_SKIP)
-async def step_skip_comment(callback: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(StateFilter(Checkout.comment, Checkout.email), F.data == CB_SKIP)
+async def step_skip(callback: CallbackQuery, state: FSMContext) -> None:
+    """«Пропустить» на необязательном шаге — комментарий или почта."""
+    field = _current_field(await state.get_state())
+    if not field:
+        await callback.answer()
+        return
     await callback.answer()
-    await _accept(callback.message, state, "comment", "")
+    await _accept(callback.message, state, field, "")
 
 
 @router.message(Checkout.phone, F.contact)
@@ -776,6 +836,21 @@ async def step_text(message: Message, state: FSMContext) -> None:
             return
         await message.answer(f"Записал телефон: {phone}", reply_markup=main_menu())
         await _accept(message, state, "phone", phone)
+        return
+
+    if field == "email":
+        # Отказ словами принимаем наравне с кнопкой: человек в чате отвечает
+        # «нет, спасибо», а не ищет глазами, куда нажать.
+        if text.lower() in ("нет", "не надо", "не хочу", "пропустить", "-", "—"):
+            await _accept(message, state, "email", "")
+            return
+        if not mail.looks_like_email(text):
+            await message.answer(
+                "Это не похоже на адрес почты. Напишите так: ivan@example.com — "
+                "или нажмите «Пропустить», почта не обязательна."
+            )
+            return
+        await _accept(message, state, "email", mail.normalize_email(text))
         return
 
     low, high = _LIMITS[field]
@@ -874,12 +949,18 @@ async def _place_order(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
 
     # Данные доставки запоминаем в профиле: следующий заказ клиент оформит
     # в два тапа кнопкой «Оставить».
+    #
+    # Почта — исключение: пустое значение сюда НЕ передаём. Пустая строка в
+    # update_client значит «убрать адрес», а пропущенный шаг значит всего лишь
+    # «сейчас не хочу вводить» — стирать этим уже записанную почту нельзя.
+    email = data.get("email", "")
     await queries.update_client(
         client_id,
         name=data.get("name", ""),
         phone=data.get("phone", ""),
         city=data.get("city", ""),
         np_branch=data.get("np_branch", ""),
+        email=email or None,
     )
     await state.clear()
 

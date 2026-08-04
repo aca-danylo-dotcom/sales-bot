@@ -4,7 +4,9 @@
  * Каждая кнопка здесь не только меняет статус, но и пишет клиенту в Telegram:
  * подтверждение оплаты, номер накладной, отмену. Поэтому ответ сервера
  * показываем целиком — вместе с оговоркой «сообщение не дошло», если бот
- * заблокирован. Что именно можно нажать, решает сервер (`can_confirm`,
+ * заблокирован. И поэтому же все четыре срабатывают по удержанию, а не по
+ * нажатию (см. components/ui/hold-button.tsx): отменённый по промаху заказ
+ * уже не вернуть — клиенту ушло сообщение, товар уехал обратно на склад. Что именно можно нажать, решает сервер (`can_confirm`,
  * `can_ship`, `can_finish`, `can_cancel`): состояние заказа знает он, а не
  * страница, открытая полчаса назад.
  *
@@ -14,9 +16,11 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { CheckCircle2, PackageCheck, Truck, XCircle } from "lucide-react";
 
 import { get } from "../api/client";
 import { BackLink, Head, Loading, LoadError, Tag, stamp } from "../components/ui";
+import HoldButton from "../components/ui/hold-button";
 import { useAction } from "../lib/actions";
 import { usePageTitle } from "../lib/meta";
 
@@ -48,11 +52,25 @@ type Order = {
   ttn: string | null;
   assignee: string | null;
   total_text: string;
+  /* Пусто, когда промокода не было. Сумма до скидки приходит отдельным полем:
+     считать её на клиенте нельзя — деньги в панели и в счёте клиента должны
+     совпадать до копейки, а округление у них разное не будет только если
+     считает кто-то один. */
+  discount_text: string;
+  full_text: string;
+  promo_code: string | null;
   items: Item[];
   client: { name: string | null; phone: string | null; created_at: string | null } | null;
 };
 
 type ClientNote = { id: number; fact: string; created_at: string };
+type Promo = {
+  code: string;
+  percent: number;
+  expires_at: string;
+  activated_at: string | null;
+  used_at: string | null;
+};
 type ChatLine = { role: string; content: string; created_at: string };
 type OtherOrder = {
   id: number;
@@ -73,6 +91,8 @@ type Card = {
   client_orders?: OtherOrder[];
   history?: ChatLine[];
   client_notes?: ClientNote[];
+  client_email?: string;
+  client_promos?: Promo[];
 };
 
 export default function OrderCard() {
@@ -232,6 +252,12 @@ export default function OrderCard() {
                   </li>
                 ))}
               </ul>
+              {order.discount_text ? (
+                <p className="muted small">
+                  Сумма без скидки: {order.full_text} · промокод {order.promo_code} — минус{" "}
+                  {order.discount_text}
+                </p>
+              ) : null}
               <p className="total">
                 Итого: <span className="strong">{order.total_text}</span>
               </p>
@@ -242,28 +268,38 @@ export default function OrderCard() {
 
             <div className="card">
               <h2>Что делаем</h2>
-              <div className="actions">
+              {/* Действия, меняющие статус заказа, срабатывают не по нажатию, а
+                  по удержанию — кнопка «Hold Button» из реестра kokonutui,
+                  владелец прислал её именно под это. Причина не в красоте:
+                  каждое из них уходит клиенту сообщением, а отмена ещё и
+                  возвращает товар на склад. Промахнуться мимо такого нельзя, а
+                  окно «Вы уверены?» на десятом заказе за день просто
+                  прокликивают не глядя. */}
+              <div className="actions hold-actions">
                 {data.can_confirm ? (
-                  <button
-                    className="btn primary"
-                    type="button"
+                  <HoldButton
+                    variant="green"
+                    label="Оплата пришла"
+                    icon={<CheckCircle2 className="h-4 w-4" />}
                     disabled={status.isPending}
-                    onClick={() => status.mutate({ url: url("confirm") })}
-                  >
-                    Оплата пришла
-                  </button>
+                    onHoldComplete={() => status.mutate({ url: url("confirm") })}
+                  />
                 ) : null}
                 {data.can_finish ? (
-                  <button
-                    className="btn"
-                    type="button"
+                  <HoldButton
+                    variant="grey"
+                    label="Заказ выполнен"
+                    icon={<PackageCheck className="h-4 w-4" />}
                     disabled={status.isPending}
-                    onClick={() => status.mutate({ url: url("done") })}
-                  >
-                    Заказ выполнен
-                  </button>
+                    onHoldComplete={() => status.mutate({ url: url("done") })}
+                  />
                 ) : null}
               </div>
+              {data.can_confirm || data.can_finish ? (
+                <p className="muted small hold-hint">
+                  Нажмите и удерживайте кнопку, пока полоса не заполнится.
+                </p>
+              ) : null}
 
               {/* Пока заказ не взят, поле накладной не показываем: отправку
                   подписывают именем, и заполнять номер, который всё равно не
@@ -274,13 +310,11 @@ export default function OrderCard() {
                   вверху страницы.
                 </p>
               ) : data.can_ship ? (
-                <form
-                  className="form ttn"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    shipAction.mutate({ url: url("ship"), data: { ttn } });
-                  }}
-                >
+                <form className="form ttn" onSubmit={(event) => event.preventDefault()}>
+                  {/* Отправка формы гасится и ничего не делает: Enter в поле
+                      номера обошёл бы удержание кнопки — заказ уехал бы
+                      клиенту с полунабранной накладной. Действие тут ровно
+                      одно — то, что под пальцем. Так же и в форме отмены. */}
                   <label>
                     <span>Номер накладной Новой Почты</span>
                     <input
@@ -291,10 +325,14 @@ export default function OrderCard() {
                       onChange={(event) => setTtn(event.target.value)}
                     />
                   </label>
-                  <div className="actions">
-                    <button className="btn primary" type="submit" disabled={shipAction.isPending}>
-                      Отправлено, сообщить клиенту
-                    </button>
+                  <div className="actions hold-actions">
+                    <HoldButton
+                      variant="blue"
+                      label="Отправлено, сообщить клиенту"
+                      icon={<Truck className="h-4 w-4" />}
+                      disabled={shipAction.isPending}
+                      onHoldComplete={() => shipAction.mutate({ url: url("ship"), data: { ttn } })}
+                    />
                     <span className="muted small">
                       Отправку записываем на вас: {order.assignee}. Клиенту уйдёт сообщение с
                       номером накладной.
@@ -306,13 +344,7 @@ export default function OrderCard() {
               ) : null}
 
               {data.can_cancel ? (
-                <form
-                  className="form cancel"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    cancelAction.mutate({ url: url("cancel"), data: { reason } });
-                  }}
-                >
+                <form className="form cancel" onSubmit={(event) => event.preventDefault()}>
                   <label>
                     <span>
                       Отмена — товар вернётся на склад. Причина останется в заказе, клиенту не
@@ -326,14 +358,16 @@ export default function OrderCard() {
                       onChange={(event) => setReason(event.target.value)}
                     />
                   </label>
-                  <div className="actions">
-                    <button
-                      className="btn danger-btn"
-                      type="submit"
+                  <div className="actions hold-actions">
+                    <HoldButton
+                      variant="red"
+                      label="Отменить заказ"
+                      icon={<XCircle className="h-4 w-4" />}
                       disabled={cancelAction.isPending}
-                    >
-                      Отменить заказ
-                    </button>
+                      onHoldComplete={() =>
+                        cancelAction.mutate({ url: url("cancel"), data: { reason } })
+                      }
+                    />
                   </div>
                 </form>
               ) : null}
@@ -423,6 +457,11 @@ export default function OrderCard() {
               <br />
               <span className="muted small">Телефон</span> {order.client?.phone || "—"}
               <br />
+              {/* Почта есть далеко не у всех: её оставляют по желанию, и «не
+                  указана» здесь — обычное дело, а не пробел в данных. */}
+              <span className="muted small">Почта</span>{" "}
+              {data.client_email || "не указана"}
+              <br />
               <span className="muted small">Telegram id</span> {order.client_id}
               <br />
               <span className="muted small">Канал</span> {order.channel}
@@ -435,6 +474,34 @@ export default function OrderCard() {
               ) : null}
             </p>
           </div>
+
+          {/* Промокоды этого человека. Блок нужен на один частый разговор:
+              «мне присылали скидку» — видно, какой код, жив ли он и не потрачен
+              ли уже на прошлый заказ. */}
+          {data.client_promos?.length ? (
+            <div className="card">
+              <h2>Промокоды</h2>
+              <ul className="notes">
+                {data.client_promos.map((promo) => (
+                  <li key={promo.code}>
+                    <span className="text">
+                      <span className="strong">{promo.code}</span> · −{promo.percent}%
+                      <span className="muted small">
+                        {" "}
+                        {promo.used_at
+                          ? `потрачен ${stamp(promo.used_at)}`
+                          : promo.expires_at < new Date().toISOString().slice(0, 19).replace("T", " ")
+                            ? "срок вышел"
+                            : promo.activated_at
+                              ? "принят клиентом, ждёт заказа"
+                              : `выписан, действует до ${promo.expires_at.slice(0, 10)}`}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div className="card">
             <h2>Другие заказы</h2>

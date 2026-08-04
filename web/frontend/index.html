@@ -3,8 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>CRM</title>
+  <!-- Тема ставится ДО отрисовки, обычным скриптом в <head>, а не из React.
+       Иначе тот, у кого выбрана тёмная, при каждом заходе получал бы вспышку
+       белой страницы: разметка появляется позже, чем браузер красит фон.
+       Значение то же, что читает src/lib/theme.ts, — ключ менять только вместе
+       с ним. -->
+  <script>
+    try {
+      if (localStorage.getItem("crm-theme") === "dark") {
+        document.documentElement.classList.add("dark");
+      }
+    } catch (error) {
+      /* приватный режим запрещает localStorage — тогда просто светлая тема */
+    }
+  </script>
 </head>
 <body>
 <div id="root"></div>

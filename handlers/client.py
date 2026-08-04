@@ -21,12 +21,12 @@ from collections import Counter, deque
 from datetime import datetime, timezone
 
 from aiogram import Bot, F, Router
-from aiogram.filters import CommandStart, StateFilter
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.types import Message, PhotoSize
 
 import config
 from db import queries
-from services import agent_stats
+from services import agent_stats, mail
 from services.ai import Message as ConvMessage
 from services.ai import ProviderUnavailable, run_agent
 from services.ai_tools import MAX_CARDS, TOOLS, ClientContext, build_executor
@@ -78,6 +78,11 @@ _total_reported_day: str = ""
 # Максимум символов во входящем сообщении: каждый символ — токены в платный ИИ.
 # Лимит щедрый — живой покупатель его не заметит, а намеренный раздув отсекается.
 _MAX_INPUT_CHARS = 1000
+
+# Слово, похожее на промокод: шесть знаков ровно из того алфавита, которым коды
+# выписываются (db/queries.py::_CODE_ALPHABET — без 0/O и 1/I/L). Границы слова
+# обязательны: без них шесть подходящих букв нашлись бы посреди любого слова.
+_PROMO_WORD_RE = re.compile(r"\b[A-Za-z2-9]{6}\b")
 
 # Снимок от клиента. Telegram хранит одно фото в нескольких размерах, и модели
 # за каждый пиксель платим мы: мелкого превью хватает, чтобы понять «чёрные
@@ -490,10 +495,119 @@ async def cmd_start(message: Message) -> None:
     )
 
 
+@router.message(Command("email"))
+async def cmd_email(message: Message) -> None:
+    """Почта клиента — по желанию и в любой момент.
+
+    Три случая в одной команде: без аргумента — показать, что записано;
+    `off` — стереть; адрес — записать. Отписка обязана быть такой же простой,
+    как подписка: адрес человек дал добровольно, значит и забрать его должен
+    одним словом, а не перепиской с менеджером.
+    """
+    await queries.ensure_client(message.from_user.id)
+    argument = (message.text or "").partition(" ")[2].strip()
+    client = await queries.get_client(message.from_user.id) or {}
+    current = client.get("email") or ""
+
+    if not argument:
+        if current:
+            await message.answer(
+                f"Ваша почта для напоминаний: {current}\n\n"
+                f"Поменять — «/email новый@адрес», убрать — «/email off».",
+                reply_markup=main_menu(),
+            )
+        else:
+            await message.answer(
+                "Почта не указана — я пишу только сюда, в Telegram.\n\n"
+                "Хотите получать напоминания и промокоды ещё и на почту — "
+                "отправьте «/email ваш@адрес». Это по желанию: без неё всё "
+                "работает как обычно.",
+                reply_markup=main_menu(),
+            )
+        return
+
+    if argument.lower() in ("off", "нет", "убрать", "удалить", "-"):
+        await queries.update_client(message.from_user.id, email="")
+        await message.answer(
+            "Убрал почту — писем больше не будет. Напоминания останутся только "
+            "здесь, в чате.",
+            reply_markup=main_menu(),
+        )
+        return
+
+    address = mail.normalize_email(argument)
+    if not mail.looks_like_email(address):
+        await message.answer(
+            "Это не похоже на адрес почты. Напишите так: «/email ivan@example.com».",
+            reply_markup=main_menu(),
+        )
+        return
+
+    await queries.update_client(message.from_user.id, email=address)
+    await message.answer(
+        f"Записал почту: {address}\n\n"
+        f"Буду присылать туда напоминания и промокоды. Передумаете — «/email off».",
+        reply_markup=main_menu(),
+    )
+
+
+async def _try_promo(message: Message) -> bool:
+    """Клиент прислал промокод? Тогда принимаем его и в ИИ не идём.
+
+    Код ищем СРЕДИ слов, а не сравниваем всё сообщение целиком: люди пишут
+    «мой промокод ABC234», «вот код: ABC234» — и требовать голый код было бы
+    придиркой к формату, которую никто не читал.
+
+    Незнакомое слово нужной длины ничего не ломает: `activate_promo` ответит
+    «unknown», и сообщение уйдёт консультанту, как будто ничего не было. Так
+    обычная фраза случайно не превращается в «неверный промокод».
+    """
+    for candidate in set(_PROMO_WORD_RE.findall(message.text or "")):
+        result, promo = await queries.activate_promo(
+            message.from_user.id, candidate
+        )
+        if result == "unknown":
+            continue
+
+        if result == "ok":
+            await message.answer(
+                f"Промокод принят: скидка {promo['percent']}% ✅\n\n"
+                f"Она посчитается сама, когда будете оформлять заказ — "
+                f"отдельно ничего вводить не нужно.",
+                reply_markup=main_menu(),
+            )
+        elif result == "active":
+            await message.answer(
+                f"Этот промокод уже у вас применён — скидка {promo['percent']}% "
+                f"посчитается при оформлении заказа 🙂",
+                reply_markup=main_menu(),
+            )
+        elif result == "used":
+            await message.answer(
+                "Этот промокод уже потрачен на прошлый заказ — он одноразовый.",
+                reply_markup=main_menu(),
+            )
+        else:  # expired
+            await message.answer(
+                "Срок этого промокода вышел 😔 Но напишите, что ищете, — подберу "
+                "и подскажу, что есть сейчас.",
+                reply_markup=main_menu(),
+            )
+        return True
+
+    return False
+
+
 @router.message(F.text)
 async def on_text(message: Message, bot: Bot) -> None:
     """Основной вход: любое текстовое сообщение покупателя обрабатывает ИИ."""
     user_id = message.from_user.id
+
+    # Промокод разбираем сами и до всех лимитов: это наш же код, отправленный
+    # человеку в напоминании, и тратить на него платный запрос к модели (а тем
+    # более отвечать «слишком много сообщений») было бы странно.
+    if await _try_promo(message):
+        return
 
     # Слишком длинное сообщение в ИИ не пускаем. Проверяем ДО лимита частоты,
     # чтобы случайная «простыня» не тратила попытку клиента.

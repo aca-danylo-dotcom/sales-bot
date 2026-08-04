@@ -23,6 +23,7 @@ import Products from "./pages/Products";
 import Stock from "./pages/Stock";
 import Summary from "./pages/Summary";
 import { RippleLayer } from "./components/ripple";
+import ThemeSwitch from "./components/theme-switch";
 import { EmptyState, Loading } from "./components/ui";
 
 /* Статистика грузится отдельным куском. Её открывают раз в неделю, а тянет она
@@ -58,6 +59,12 @@ export default function App() {
         <Link className="brand" to="/">
           {meta?.shop_name ?? "CRM"}
         </Link>
+        {/* Кнопка темы стоит перед меню и прижата вправо: меню разделов висит
+            по центру шапки отдельным слоем, а на узком экране сворачивается в
+            свою кнопку — переключатель должен оказаться слева от неё, а не за
+            краем экрана. Подпись Light/Dark на телефоне убирается: там рядом
+            название магазина и кнопка меню. */}
+        <ThemeSwitch className="theme-switch" size="sm" />
         <FloatingDock items={SECTIONS} />
       </header>
 

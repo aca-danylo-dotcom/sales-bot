@@ -1,6 +1,6 @@
 """Фоновые задачи бота.
 
-Их три.
+Их четыре.
 
 1. Отмена заказов, которые так и не оплатили. Нужна не ради порядка в таблице,
    а ради склада — `queries.create_order` списывает остатки сразу, и брошенный
@@ -13,14 +13,21 @@
    же чат превращает магазин в спамера: однократность держится на поле
    `carts.reminded_at`, а не на памяти процесса, поэтому переживает рестарт.
 
-3. Выгрузка заказов и остатков в Google Sheets — по расписанию, потому что
+3. Напоминание тем, кто говорил с ботом и пропал, ничего не купив. Здесь пауза
+   держится на `clients.outreach_at` — она общая для обеих рассылок, поэтому
+   человек, получивший письмо про корзину, не получит следом второе про то, что
+   его давно не было.
+
+   Обе рассылки пишет модель, а не шаблон (см. services/outreach.py), и обе
+   несут именной промокод, если скидки включены (PROMO_PERCENT).
+
+4. Выгрузка заказов и остатков в Google Sheets — по расписанию, потому что
    таблицу владелец открывает когда захочет, а не после каждого заказа. Задача
    ставится, только если выгрузка настроена (`sheets.is_enabled()`): иначе
    планировщик каждые десять минут писал бы в лог, что она выключена.
 """
 from __future__ import annotations
 
-import html
 import logging
 
 from aiogram import Bot
@@ -28,9 +35,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import config
 from db import queries
+from keyboards.menus import main_menu
 from keyboards.orders import added_kb
-from services import sheets
-from services.format import money, variant_label
+from services import mail, outreach, sheets
+from services.format import money
 
 logger = logging.getLogger(__name__)
 
@@ -93,36 +101,17 @@ def _is_quiet_hours() -> bool:
     return hour >= _QUIET_FROM_HOUR or hour < _QUIET_TO_HOUR
 
 
-def _cart_reminder_text(cart: dict) -> str:
-    """Напоминание: что лежит в корзине, на какую сумму и что делать дальше.
-
-    Состав перечисляем полностью, потому что за несколько часов человек уже не
-    помнит, какой именно размер выбрал, — а идти проверять ради этого не станет.
-    """
-    lines = ["🧺 <b>Ваша корзина всё ещё ждёт</b>", ""]
-    for item in cart["items"]:
-        lines.append(
-            f"{html.escape(item['title'])} ({html.escape(variant_label(item))}) — "
-            f"{item['qty']} шт"
-        )
-    lines += [
-        "",
-        f"Сумма: <b>{money(cart['total'])}</b>",
-        "",
-        # Без вранья про «отложили за вами»: корзина ничего не резервирует,
-        # остаток списывается только при оформлении заказа.
-        "Товар в корзине не забронирован — остаток общий. Если всё ещё "
-        "актуально, давайте оформим 🙂",
-    ]
-    return "\n".join(lines)
-
-
 async def remind_abandoned_carts(bot: Bot) -> int:
     """Одно напоминание по каждой брошенной корзине. Возвращает число отправленных.
 
     Кому напоминание НЕ уйдёт (условия в `queries.get_abandoned_carts`):
     тем, у кого уже есть незавершённый заказ, — человек оформил, и звать его в
     корзину значит выглядеть невнимательным; и тем, кому уже напоминали.
+
+    Текст пишет модель под конкретную корзину (services/outreach.py), а к нему
+    код добавляет состав, сумму и — если скидки включены — именной промокод.
+    Разделение важное: числа в сообщении должны приходить из базы, а не из
+    фантазии модели.
     """
     if _is_quiet_hours():
         return 0
@@ -143,19 +132,69 @@ async def remind_abandoned_carts(bot: Bot) -> int:
         # считается израсходованным: иначе задача ломилась бы в него каждые
         # полчаса до скончания веков.
         await queries.mark_cart_reminded(client_id)
+        await queries.mark_outreach(client_id)
+
+        client = await queries.get_client(client_id)
+        promo = await outreach.make_promo(client_id, "cart")
+        text = await outreach.cart_reminder(client, cart, promo)
+
         try:
-            await bot.send_message(
-                client_id,
-                _cart_reminder_text(cart),
-                parse_mode="HTML",
-                reply_markup=added_kb(),
-            )
+            # Без parse_mode: текст писала модель, и любой «<» в нём сорвал бы
+            # отправку целиком (см. шапку services/outreach.py).
+            await bot.send_message(client_id, text, reply_markup=added_kb())
             sent += 1
         except Exception:
             logger.warning("Не удалось напомнить клиенту %s о корзине", client_id)
 
+        await outreach.send_email_copy(client, "Ваша корзина в магазине ждёт", text)
+
     if sent:
         logger.info("Отправлено напоминаний о брошенной корзине: %s", sent)
+    return sent
+
+
+async def win_back_sleeping_clients(bot: Bot) -> int:
+    """Напоминание тем, кто говорил с ботом и пропал, ничего не купив.
+
+    Второй повод написать первым — и куда более скользкий, чем корзина: там
+    человек сам положил товар и явно чего-то хотел, а здесь мы приходим к тому,
+    кто нас ни о чём не просил. Поэтому ограничений сразу четыре: только раз в
+    WINBACK_COOLDOWN_DAYS на человека, не чаще чем через WINBACK_AFTER_DAYS
+    тишины, не больше WINBACK_BATCH за проход и никогда ночью.
+
+    Тех, у кого лежит непустая корзина, задача не трогает — им идёт своё
+    напоминание, и получить оба сразу значит выглядеть навязчивым.
+    """
+    if not config.WINBACK_ENABLED or _is_quiet_hours():
+        return 0
+
+    clients = await queries.get_sleeping_clients(
+        days=config.WINBACK_AFTER_DAYS,
+        cooldown_days=config.WINBACK_COOLDOWN_DAYS,
+        limit=config.WINBACK_BATCH,
+    )
+    sent = 0
+
+    for row in clients:
+        client_id = row["client_id"]
+        await queries.mark_outreach(client_id)
+
+        client = await queries.get_client(client_id)
+        promo = await outreach.make_promo(client_id, "sleeping")
+        text = await outreach.winback(client, promo)
+
+        try:
+            await bot.send_message(client_id, text, reply_markup=main_menu())
+            sent += 1
+        except Exception:
+            # Обычное дело: человек удалил чат или заблокировал бота. Метка уже
+            # стоит, значит второй раз мы к нему не придём.
+            logger.warning("Не удалось написать клиенту %s", client_id)
+
+        await outreach.send_email_copy(client, f"{config.SHOP_NAME}: давно вас не было", text)
+
+    if sent:
+        logger.info("Отправлено напоминаний «давно не заходили»: %s", sent)
     return sent
 
 
@@ -186,6 +225,21 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         coalesce=True,
         misfire_grace_time=3600,
     )
+    if config.WINBACK_ENABLED:
+        # Раз в сутки, а не каждый час: «давно не заходил» — состояние, которое
+        # за час не меняется, а лишние проходы только жгут запросы к модели.
+        # Час выбран дневной и в рабочее время — ночные пропускаются проверкой
+        # тихих часов, и задача просто ничего не делала бы до следующих суток.
+        scheduler.add_job(
+            win_back_sleeping_clients,
+            "cron",
+            hour=12,
+            minute=0,
+            args=(bot,),
+            id="win_back_sleeping_clients",
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
     if sheets.is_enabled():
         scheduler.add_job(
             sheets.sync_to_sheets,
@@ -199,6 +253,7 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     logger.info(
         "Планировщик запущен: отмена неоплаченных заказов старше %s ч (раз в %s мин), "
         "напоминание о корзине после %s ч простоя (раз в %s мин, кроме %s:00–%s:00), "
+        "«давно не заходили» — %s, скидка в напоминаниях — %s, письма — %s, "
         "выгрузка в Google Sheets — %s",
         config.ORDER_PAYMENT_TIMEOUT_HOURS,
         _CHECK_INTERVAL_MINUTES,
@@ -206,6 +261,11 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         _CART_CHECK_INTERVAL_MINUTES,
         _QUIET_FROM_HOUR,
         _QUIET_TO_HOUR,
+        (f"после {config.WINBACK_AFTER_DAYS} дн тишины, не чаще раза в "
+         f"{config.WINBACK_COOLDOWN_DAYS} дн" if config.WINBACK_ENABLED else "выключено"),
+        (f"{config.PROMO_PERCENT}% на {config.PROMO_TTL_DAYS} дн"
+         if config.PROMO_PERCENT else "выключена"),
+        "включены" if mail.is_enabled() else "выключены",
         f"раз в {_SHEETS_SYNC_MINUTES} мин" if sheets.is_enabled() else "выключена",
     )
     return scheduler

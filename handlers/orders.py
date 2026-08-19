@@ -69,7 +69,7 @@ from keyboards.orders import (
     summary_kb,
     variants_pick_kb,
 )
-from services import agent_stats, mail
+from services import agent_stats, mail, payments
 from services.format import (
     ORDER_STATUS_RU,
     clean_phone,
@@ -979,11 +979,17 @@ async def _place_order(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
     await callback.message.answer(
         f"Спасибо! Заказ №{order_id} принят.", reply_markup=main_menu()
     )
-    await callback.message.answer(
-        payment_text(order), reply_markup=payment_kb(order_id), parse_mode=_HTML
-    )
+
+    # Провайдер подключён — считаем оплату счётом в Telegram, а не переводом
+    # на карту. Дальше решает handlers/payments.py: pre_checkout_query и
+    # successful_payment, заказ подтвердится сам, без «Я оплатил» и владельца.
+    if not await payments.send_invoice(bot, order):
+        await callback.message.answer(
+            payment_text(order), reply_markup=payment_kb(order_id), parse_mode=_HTML
+        )
     # Владельцу здесь не пишем: заказ ждёт оплаты, решать по нему нечего.
-    # Заявка уйдёт, когда клиент нажмёт «Я оплатил» (см. claim_paid), а сам
+    # При переводе на карту заявка уйдёт по кнопке «Я оплатил» (см. claim_paid);
+    # при оплате картой в Telegram — сама придёт после successful_payment. Сам
     # заказ виден в веб-CRM с момента оформления.
     await callback.answer()
 

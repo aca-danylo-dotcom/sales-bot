@@ -30,7 +30,7 @@ from keyboards.catalog import (
     categories_kb,
     more_kb,
 )
-from keyboards.menus import BTN_CATALOG
+from keyboards.menus import BTN_CATALOG, asks_for
 
 logger = logging.getLogger(__name__)
 router = Router(name="catalog")
@@ -164,7 +164,7 @@ async def _replace(callback: CallbackQuery, text: str, markup) -> None:
         await callback.message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
-@router.message(StateFilter(None), F.text == BTN_CATALOG)
+@router.message(StateFilter(None), F.text.func(lambda t: asks_for(t, BTN_CATALOG)))
 @router.message(StateFilter(None), F.text.func(_is_catalog_request))
 async def open_catalog(message: Message) -> None:
     await queries.ensure_client(message.from_user.id)

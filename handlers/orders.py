@@ -27,7 +27,14 @@ from aiogram.types import CallbackQuery, Message
 
 import config
 from db import queries
-from keyboards.menus import BTN_CART, BTN_CATALOG, BTN_HELP, BTN_ORDERS, main_menu
+from keyboards.menus import (
+    BTN_CART,
+    BTN_CATALOG,
+    BTN_HELP,
+    BTN_ORDERS,
+    asks_for,
+    main_menu,
+)
 from keyboards.orders import (
     CB_ADD,
     CB_CANCEL,
@@ -77,9 +84,14 @@ router = Router(name="orders")
 
 _HTML = "HTML"
 
-# Тексты нижнего меню: во время оформления они приходят как обычный текст и
-# иначе записались бы в имя или город получателя.
-_MENU_TEXTS = {BTN_CATALOG, BTN_CART, BTN_ORDERS, BTN_HELP}
+# Просьбы открыть раздел: «корзина», «мои заказы», «каталог». Во время
+# оформления они приходят обычным текстом и иначе записались бы в имя или
+# город получателя — человек хотел уйти в корзину, а уехал бы в накладную.
+_SECTION_WORDS = (BTN_CATALOG, BTN_CART, BTN_ORDERS, BTN_HELP)
+
+
+def _asks_for_section(text: str | None) -> bool:
+    return any(asks_for(text, word) for word in _SECTION_WORDS)
 
 # Ограничения полей заказа. Верхние границы — чтобы в накладную Новой Почты не
 # уехала «простыня», нижние — чтобы не приняли пустую строку из одного символа.
@@ -423,7 +435,7 @@ async def notify_admin_order(bot: Bot, order: dict, username: str | None) -> Non
 # ─────────────────────────── Корзина ───────────────────────────
 
 
-@router.message(StateFilter(None), F.text == BTN_CART)
+@router.message(StateFilter(None), F.text.func(lambda t: asks_for(t, BTN_CART)))
 async def show_cart_message(message: Message) -> None:
     await queries.ensure_client(message.from_user.id)
     cart = await queries.get_cart(message.from_user.id)
@@ -793,10 +805,11 @@ async def step_text(message: Message, state: FSMContext) -> None:
     if current == Checkout.saved.state:
         # Кнопки «Отменить» на этом экране нет намеренно, поэтому выходом
         # служит нижнее меню: нажал «Каталог» — значит, передумал оформлять.
-        if message.text.strip() in _MENU_TEXTS:
+        if _asks_for_section(message.text):
             await state.clear()
             await message.answer(
-                "Оформление отложено, корзина сохранена. Нажмите кнопку ещё раз 🙂",
+                "Оформление отложено, корзина сохранена. Напишите, когда "
+                "будете готовы продолжить 🙂",
                 reply_markup=main_menu(),
             )
             return
@@ -814,7 +827,7 @@ async def step_text(message: Message, state: FSMContext) -> None:
         return
 
     text = message.text.strip()
-    if text in _MENU_TEXTS:
+    if _asks_for_section(text):
         await message.answer(
             "Сейчас оформляем заказ. Чтобы выйти — нажмите «Отменить оформление» "
             "под вопросом выше."
@@ -1027,7 +1040,7 @@ async def _orders_view(client_id: int) -> tuple[str, object]:
     return "\n".join(lines), orders_kb(orders)
 
 
-@router.message(StateFilter(None), F.text == BTN_ORDERS)
+@router.message(StateFilter(None), F.text.func(lambda t: asks_for(t, BTN_ORDERS)))
 async def my_orders(message: Message) -> None:
     """Последние заказы со статусами, кнопками оплаты и отмены."""
     await queries.ensure_client(message.from_user.id)

@@ -2336,8 +2336,11 @@ async def get_ai_usage(client_id: int) -> tuple[int, int]:
 # ─────────────────────── Показанные карточки ───────────────────────
 
 
-async def get_shown_cards(client_id: int, hours: int) -> set[int]:
+async def get_shown_cards(client_id: int, hours: float) -> set[int]:
     """id товаров, чьи карточки клиент уже видел за последние `hours` часов.
+
+    Часы дробные: окно «не повторять» бывает и в десять минут — когда клиент
+    сам просит показать товар, см. handlers/client._repeat_window.
 
     По ним хендлер понимает, что фото и цену слать заново не нужно: клиент
     видит их выше в переписке, и повтор выглядит как заедание бота.

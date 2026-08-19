@@ -120,6 +120,12 @@ _seen_albums: dict[str, float] = {}
 # поэтому память о показанном протухает.
 _CARD_REPEAT_HOURS = 12
 
+# А это окно для случая, когда клиент сам просит посмотреть товар («покажите»,
+# «давай посмотрю»). Держать тут те же 12 часов нельзя: человек просит показать,
+# консультант отвечает «вот», и не приходит ничего — обещание в пустоту. Десяти
+# минут хватает, чтобы не задваивать карточку, которая ещё на экране.
+_CARD_ON_REQUEST_HOURS = 10 / 60
+
 
 def _get_lock(user_id: int) -> asyncio.Lock:
     return _user_locks.setdefault(user_id, asyncio.Lock())
@@ -332,6 +338,25 @@ _PHOTO_REQUEST_RE = re.compile(
 def _asks_for_photo(text: str) -> bool:
     """Клиент сам попросил фото — тогда повтор карточки уместен."""
     return bool(_PHOTO_REQUEST_RE.search(text))
+
+
+# Просьба посмотреть товар: «покажите», «давай посмотрю», «глянуть бы». Слова
+# про само изображение сюда не входят — они в _PHOTO_REQUEST_RE выше и дают
+# безусловный повтор. Здесь повтор мягкий, с коротким окном.
+_SHOW_REQUEST_RE = re.compile(r"покаж|показ|посмотр|подив|глян", re.IGNORECASE)
+
+
+def _repeat_window(text: str) -> float:
+    """Сколько часов помнить показанную карточку, чтобы не слать её заново.
+
+    Клиент попросил фото — не помним вовсе (шлём). Попросил посмотреть —
+    помним десять минут. Обычная реплика — двенадцать часов, как и было.
+    """
+    if _asks_for_photo(text):
+        return 0
+    if _SHOW_REQUEST_RE.search(text):
+        return _CARD_ON_REQUEST_HOURS
+    return _CARD_REPEAT_HOURS
 
 
 # Слова-связки: из них состоит подводка к карточкам («вот что есть у нас в
@@ -887,13 +912,15 @@ async def _cards_to_send(
 
     Инструменты фото не отправляют (модель их не видит) — они лишь помечают
     товары в ctx.show_products, а список хранит каждый товар один раз, поэтому
-    в одном ответе одна и та же карточка не задваивается.
+    в одном ответе одна и та же карточка не задваивается. Когда инструментов в
+    ходу не было вовсе, товар ищется по витрине — см. ветку ниже.
 
     Между сообщениями карточку не повторяем: клиент уточняет размер, модель в
     ответе обязана назвать товар по названию (иначе фото не уходит вообще) — и
     раньше на каждую такую реплику прилетала та же карточка по новому кругу.
-    Что уже показано, помнит таблица shown_cards; повтор возможен, только если
-    клиент прямо попросил фото или вернулся к товару спустя _CARD_REPEAT_HOURS.
+    Что уже показано, помнит таблица shown_cards; насколько долго — решает
+    _repeat_window: попросил показать — карточка уходит снова, обычная реплика —
+    повтора нет до _CARD_REPEAT_HOURS.
 
     Порядок карточек — как в ответе: клиент читает «есть кроссовки и перчатки» и
     ниже видит их в том же порядке.
@@ -910,13 +937,28 @@ async def _cards_to_send(
         if product and product["is_active"]:
             products[product_id] = product
 
+    # Поиск в этом ходу не звучал, а товар назван. Так бывает постоянно: витрина
+    # лежит у модели прямо в промпте, и на простой вопрос она отвечает по ней, не
+    # тратя вызов инструмента; про уже обсуждённый товар повторный поиск ей и
+    # вовсе запрещён. Без этой ветки клиент в таких случаях получал только текст:
+    # ни фото, ни цены, ни кнопки «В корзину». Кандидатов берём из витрины — это
+    # тот же список, по которому модель называет товары, так что чужой товар
+    # сюда не попадёт.
+    if not products:
+        titles = {row["id"]: row["title"] for row in await queries.get_showcase()}
+        for product_id in _mentioned_positions(titles, reply):
+            product = await queries.get_product_full(product_id)
+            if product and product["is_active"]:
+                products[product_id] = product
+
     positions = _mentioned_positions(
         {pid: product["title"] for pid, product in products.items()}, reply
     )
     ordered = [pid for pid, _ in sorted(positions.items(), key=lambda item: item[1])]
 
-    if not _asks_for_photo(message.text or ""):
-        seen = await queries.get_shown_cards(message.from_user.id, _CARD_REPEAT_HOURS)
+    window = _repeat_window(message.text or "")
+    if window:
+        seen = await queries.get_shown_cards(message.from_user.id, window)
         ordered = [pid for pid in ordered if pid not in seen]
 
     # Пока речь про присланный снимок, карточек шлём меньше: клиент показал одну

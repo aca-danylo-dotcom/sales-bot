@@ -151,9 +151,32 @@ export default function HoldButton({
         })}
         initial={{ width: "0%" }}
       />
-      <span className="relative z-10 flex w-full items-center justify-center gap-2">
-        {icon}
-        {isHolding ? holdingLabel : label}
+      {/* Грид-стек, а не условный рендер одной строки: у надписи покоя и
+          надписи «держите» разная длина, и подмена текста при простом flex
+          меняла ширину кнопки прямо в момент нажатия. Палец касался правой
+          половины — кнопка сжималась под короткую надпись, курсор оказывался
+          уже вне неё, браузер это читал как mouseleave и тут же обрывал
+          удержание. Здесь занимают одну и ту же ячейку оба варианта сразу:
+          ширина считается по более длинному и больше не скачет. */}
+      <span className="relative z-10 grid w-full place-items-center">
+        <span
+          className={cn(
+            "col-start-1 row-start-1 flex items-center justify-center gap-2",
+            isHolding && "invisible",
+          )}
+        >
+          {icon}
+          {label}
+        </span>
+        <span
+          className={cn(
+            "col-start-1 row-start-1 flex items-center justify-center gap-2",
+            !isHolding && "invisible",
+          )}
+        >
+          {icon}
+          {holdingLabel}
+        </span>
       </span>
     </Button>
   );

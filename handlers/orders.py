@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import html
 import logging
-import re
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -64,7 +63,14 @@ from keyboards.orders import (
     variants_pick_kb,
 )
 from services import agent_stats, mail
-from services.format import ORDER_STATUS_RU, looks_like_name, money, variant_label
+from services.format import (
+    ORDER_STATUS_RU,
+    clean_phone,
+    looks_like_branch,
+    looks_like_name,
+    money,
+    variant_label,
+)
 
 logger = logging.getLogger(__name__)
 router = Router(name="orders")
@@ -92,15 +98,6 @@ _MAX_ORDERS_SHOWN = 5
 # нему владельцу не шлём — он их не поймёт, заказ он в глаза не видел.
 _UNSEEN_BY_ADMIN = ("new", "awaiting_payment")
 
-# Телефон: оставляем только цифры и ведущий плюс. Украинский номер — 10 цифр
-# без кода страны, международный — до 15 (стандарт E.164).
-_PHONE_CLEAN_RE = re.compile(r"[^\d+]")
-
-# Отделение Новой Почты всегда с номером: «12», «№12», «Поштомат 4521».
-# Без цифры это не адрес доставки, а фраза вроде «как обычно» или «на твоё
-# усмотрение» — по такой строке посылку не отправить, поэтому переспрашиваем.
-_BRANCH_DIGIT_RE = re.compile(r"\d")
-
 # Сколько раз переспрашиваем имя, прежде чем принять как есть: проверка не знает
 # всех имён на свете, и упереться на первом шаге хуже, чем странное имя в заказе.
 _MAX_NAME_ATTEMPTS = 3
@@ -110,23 +107,9 @@ def _esc(value: object) -> str:
     return html.escape(str(value), quote=False)
 
 
-def _clean_phone(text: str) -> str | None:
-    """Нормализует номер к виду +380XXXXXXXXX. None — если это не телефон."""
-    cleaned = _PHONE_CLEAN_RE.sub("", text or "")
-    plus = cleaned.startswith("+")
-    digits = cleaned.lstrip("+").replace("+", "")
-    if not digits.isdigit():
-        return None
-
-    if not plus:
-        # Локальные записи украинских номеров: 0XXXXXXXXX и 80XXXXXXXXX
-        if len(digits) == 10 and digits.startswith("0"):
-            digits = "38" + digits
-        elif len(digits) == 11 and digits.startswith("80"):
-            digits = "3" + digits
-    if not 10 <= len(digits) <= 15:
-        return None
-    return "+" + digits
+# Тот же разбор номера, что и у мини-приложения (см. services/format.py):
+# заказ из чата и заказ из витрины должны попадать в базу одинаковыми.
+_clean_phone = clean_phone
 
 
 class Checkout(StatesGroup):
@@ -287,17 +270,29 @@ def payment_text(order: dict) -> str:
     )
 
 
-def admin_order_text(order: dict, username: str | None = None) -> str:
+def admin_order_text(
+    order: dict, username: str | None = None, *, head: tuple[str, str] | None = None
+) -> str:
     """Пуш владельцу об оплате: состав, сумма, получатель, контакт клиента.
 
     Единственное сообщение по заказу — по нему владелец и принимает решение,
     поэтому в нём сразу всё: лезть за составом и адресом в переписку выше он не
     должен.
+
+    `head` — заголовок и строка под ним. Меняется он потому, что об оплате
+    сообщают двое: клиент кнопкой «Я оплатил» (поступление надо сверить) и
+    платёжная система Telegram (сверять нечего, деньги уже пришли). Всё
+    остальное — состав, сумма, адрес — в обоих случаях одно и то же, и
+    расходиться этим текстам нельзя.
     """
     contact = f"@{username}" if username else f"id {order['client_id']}"
-    lines = [
+    title, subtitle = head or (
         f"💳 <b>Клиент оплатил заказ №{order['id']}</b>",
         "Проверьте поступление и подтвердите.",
+    )
+    lines = [
+        title,
+        subtitle,
         "",
         order_items_text(order),
         "",
@@ -633,7 +628,7 @@ async def _known_delivery(client_id: int) -> dict:
             value = ""
         known[field] = value
 
-    if known["np_branch"] and not _BRANCH_DIGIT_RE.search(known["np_branch"]):
+    if known["np_branch"] and not looks_like_branch(known["np_branch"]):
         known["np_branch"] = ""
 
     missing = [field for field in _PROFILE_FIELDS if not known[field]]
@@ -858,7 +853,7 @@ async def step_text(message: Message, state: FSMContext) -> None:
         await message.answer("Слишком коротко — напишите, пожалуйста, подробнее.")
         return
 
-    if field == "np_branch" and not _BRANCH_DIGIT_RE.search(text):
+    if field == "np_branch" and not looks_like_branch(text):
         await message.answer(
             "В отделении Новой Почты должен быть номер. Напишите его цифрой — "
             "например «12», «№7» или «Поштомат 4521»."

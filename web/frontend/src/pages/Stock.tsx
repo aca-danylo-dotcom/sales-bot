@@ -136,9 +136,9 @@ export default function Stock() {
                         {row.is_active ? "" : " · скрыт"}
                       </span>
                     </td>
-                    <td>{row.variant}</td>
-                    <td className="num muted">{row.price_text}</td>
-                    <td className="num">
+                    <td data-label="Вариант">{row.variant}</td>
+                    <td className="num muted" data-label="Цена">{row.price_text}</td>
+                    <td className="num" data-label="Остаток">
                       {/* Нулевые остатки подсвечены: их и приходят пополнять. */}
                       <input
                         className={`stock ${values[row.id] === "0" ? "zero" : ""}`}

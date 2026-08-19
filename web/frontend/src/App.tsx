@@ -1,96 +1,85 @@
 /**
- * Каркас панели: шапка, место под сообщения, разделы.
+ * Развилка: кому что показать.
  *
- * Адреса те же, что были у серверных страниц (`/orders/5`, `/products/stock`),
- * поэтому сохранённые закладки и ссылки, отправленные коллегам, продолжают
- * работать. Отдавать index.html на любой из этих адресов умеет сам сервер —
- * см. catch-all в web/app.py.
+ * Одна сборка обслуживает три случая — панель владельца в браузере, ту же
+ * панель внутри Telegram и витрину покупателя. Здесь только выбор, сами
+ * разделы лежат в Crm.tsx и shop/Shop.tsx и подгружаются по надобности:
+ * покупателю не приезжают таблицы и графики панели, владельцу в браузере —
+ * витрина.
+ *
+ * Решение о роли принимает СЕРВЕР (`role` в /api/shop/meta). Фронт мог бы
+ * сравнить id сам, но такую проверку правят в браузере за минуту; данные же
+ * панели закрыты подписью Telegram (web/auth.py), и подделанная роль к ним не
+ * пустит — здесь она влияет только на то, какие экраны рисовать.
  */
-import { Suspense, lazy } from "react";
-import { Link, Route, Routes } from "react-router-dom";
-import { ChartColumn, LayoutDashboard, Package, Receipt } from "lucide-react";
+import { Suspense, lazy, useEffect } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { FloatingDock } from "./components/ui/floating-dock";
-import type { DockItem } from "./components/ui/floating-dock";
-import { FlashMessages } from "./lib/flash";
-import { useMeta } from "./lib/meta";
-import { NewOrderToasts } from "./notifications/NewOrderToasts";
-import OrderCard from "./pages/OrderCard";
-import Orders from "./pages/Orders";
-import ProductCard from "./pages/ProductCard";
-import ProductNew from "./pages/ProductNew";
-import Products from "./pages/Products";
-import Stock from "./pages/Stock";
-import Summary from "./pages/Summary";
-import { RippleLayer } from "./components/ripple";
-import ThemeSwitch from "./components/theme-switch";
-import { EmptyState, Loading } from "./components/ui";
+import { get } from "./api/client";
+import { Loading } from "./components/ui";
+import { followTelegramTheme, inTelegram, setupWebApp } from "./lib/telegram";
+import { useShopMeta } from "./shop/api";
 
-/* Статистика грузится отдельным куском. Её открывают раз в неделю, а тянет она
-   за собой библиотеку графиков — незачем задерживать из-за неё «Заказы»,
-   которые открывают каждые пять минут. */
-const Stats = lazy(() => import("./pages/Stats"));
+const Crm = lazy(() => import("./Crm"));
+const Login = lazy(() => import("./Login"));
+const Shop = lazy(() => import("./shop/Shop"));
 
-/* Разделы панели. `end` только у сводки: её адрес — начало всех остальных.
-   «Товары» подсвечиваются и на остатках, и в карточке товара — остатки не
-   отдельный раздел, а второй вид тех же товаров. */
-const SECTIONS: DockItem[] = [
-  { title: "Сводка", to: "/", end: true, icon: <LayoutDashboard /> },
-  { title: "Заказы", to: "/orders", icon: <Receipt /> },
-  { title: "Товары", to: "/products", icon: <Package /> },
-  { title: "Статистика", to: "/stats", icon: <ChartColumn /> },
-];
-
-function NotFound() {
-  return (
-    <EmptyState
-      title="Такой страницы нет."
-      hint={<Link to="/">Вернуться на сводку</Link>}
-    />
-  );
-}
+/** Нужен ли пароль в этом браузере и введён ли он уже. */
+type Session = { required: boolean; authorized: boolean };
 
 export default function App() {
-  const meta = useMeta();
+  const telegram = inTelegram();
+  const location = useLocation();
 
-  return (
-    <>
-      <header className="topbar">
-        <Link className="brand" to="/">
-          {meta?.shop_name ?? "CRM"}
-        </Link>
-        {/* Кнопка темы стоит перед меню и прижата вправо: меню разделов висит
-            по центру шапки отдельным слоем, а на узком экране сворачивается в
-            свою кнопку — переключатель должен оказаться слева от неё, а не за
-            краем экрана. Подпись Light/Dark на телефоне убирается: там рядом
-            название магазина и кнопка меню. */}
-        <ThemeSwitch className="theme-switch" size="sm" />
-        <FloatingDock items={SECTIONS} />
-      </header>
+  // Готовим окно один раз: развернуть на весь экран и подхватить тему клиента.
+  useEffect(() => {
+    if (!telegram) return;
+    setupWebApp();
+    return followTelegramTheme();
+  }, [telegram]);
 
-      <main className="page">
-        <FlashMessages />
-        <Suspense fallback={<Loading />}>
-        <Routes>
-          <Route path="/" element={<Summary />} />
-          <Route path="/stats" element={<Stats />} />
-          <Route path="/orders" element={<Orders />} />
-          <Route path="/orders/:id" element={<OrderCard />} />
-          <Route path="/products" element={<Products />} />
-          <Route path="/products/new" element={<ProductNew />} />
-          <Route path="/products/stock" element={<Stock />} />
-          <Route path="/products/:id" element={<ProductCard />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-        </Suspense>
-      </main>
+  const { data: meta, isPending } = useShopMeta(telegram);
+  const client = useQueryClient();
 
-      {/* Карточки о новых заказах — поверх всего, в правом нижнем углу. */}
-      <NewOrderToasts />
+  // Спрашиваем про пароль только в браузере: в Telegram вход не при чём.
+  const { data: session, isPending: sessionPending } = useQuery({
+    queryKey: ["session"],
+    queryFn: ({ signal }) => get<Session>("/api/session", signal),
+    enabled: !telegram,
+    staleTime: Infinity,
+  });
 
-      {/* Круг, разбегающийся при нажатии на любую кнопку панели. Стоит один раз
-          здесь: кнопки о нём не знают и ничего для него не делают. */}
-      <RippleLayer />
-    </>
+  const panel = (element: React.ReactNode) => (
+    <Suspense fallback={<Loading />}>{element}</Suspense>
   );
+
+  // Браузер: панель под паролем. Если пароль в настройках не задан, сервер
+  // отвечает authorized сразу — панель открывается, как открывалась раньше.
+  if (!telegram) {
+    if (sessionPending || !session) return <Loading />;
+    if (!session.authorized) {
+      return panel(
+        <Login onDone={() => client.invalidateQueries({ queryKey: ["session"] })} />,
+      );
+    }
+    return panel(<Crm />);
+  }
+
+  // Пока не знаем роль — не показываем ничего: мигнуть панелью владельца перед
+  // покупателем хуже, чем полсекунды ожидания.
+  if (isPending || !meta) return <Loading text="Открываем магазин…" />;
+
+  if (location.pathname.startsWith("/shop")) {
+    return panel(
+      <Routes>
+        <Route path="/shop/*" element={<Shop />} />
+      </Routes>,
+    );
+  }
+
+  // Покупателю вне витрины делать нечего: адрес панели он мог получить только
+  // случайно — ссылкой из переписки или прошлым заходом. Владелец же остаётся
+  // в панели, а свой магазин смотрит по /shop — глазами покупателя.
+  return meta.role === "client" ? <Navigate to="/shop" replace /> : panel(<Crm />);
 }

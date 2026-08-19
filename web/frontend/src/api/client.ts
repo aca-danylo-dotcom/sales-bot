@@ -11,7 +11,21 @@
  *     кто-то другой. Панель на такое молча перечитывает карточку.
  *   * 400 с полем `problems` — проверка формы. Список претензий показываем
  *     рядом с формой, а не тостом.
+ *
+ * Внутри Telegram к каждому запросу добавляется подпись мини-приложения — по
+ * ней сервер понимает, кто спрашивает (см. web/auth.py). В браузере её нет, и
+ * заголовок не отправляется вовсе: пустое значение сервер счёл бы попыткой
+ * войти как из Telegram и отказал бы панели, которая работает на компьютере.
  */
+import { initData } from "../lib/telegram";
+
+const INIT_DATA_HEADER = "X-Telegram-Init-Data";
+
+/** Заголовки запроса вместе с подписью Telegram, если мы внутри мессенджера. */
+function withIdentity(headers: Record<string, string> = {}): Record<string, string> {
+  const signature = initData();
+  return signature ? { ...headers, [INIT_DATA_HEADER]: signature } : headers;
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -66,7 +80,7 @@ async function send<T>(url: string, init: RequestInit): Promise<T> {
 }
 
 export function get<T>(url: string, signal?: AbortSignal): Promise<T> {
-  return send<T>(url, { signal, headers: { Accept: "application/json" } });
+  return send<T>(url, { signal, headers: withIdentity({ Accept: "application/json" }) });
 }
 
 /**
@@ -78,11 +92,14 @@ export function get<T>(url: string, signal?: AbortSignal): Promise<T> {
  */
 export function post<T>(url: string, data?: Record<string, unknown> | FormData): Promise<T> {
   if (data instanceof FormData) {
-    return send<T>(url, { method: "POST", body: data });
+    return send<T>(url, { method: "POST", body: data, headers: withIdentity() });
   }
   return send<T>(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: withIdentity({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    }),
     body: JSON.stringify(data ?? {}),
   });
 }

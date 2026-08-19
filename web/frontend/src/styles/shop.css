@@ -1,0 +1,578 @@
+/* Витрина в Telegram.
+
+   Отдельным файлом от панели: там рабочий инструмент за компьютером — плотные
+   таблицы, наведение мышью, много данных на экране. Здесь телефон, палец и
+   один товар за раз. Общие у них только переменные цветов (styles/app.css) —
+   витрина обязана выглядеть тем же магазином, что и панель владельца.
+
+   Размеры сделаны от пальца, а не от глаза: всё нажимаемое — минимум 44px,
+   это нижняя граница, при которой в кнопку попадают не глядя.
+
+   Тему здесь не выбирают: внутри мессенджера её задаёт клиент Telegram, и
+   класс `dark` ставится по его настройке (см. lib/telegram.ts). Поэтому свои
+   цвета витрина не заводит вовсе — берёт те же переменные, что и панель. */
+
+.shop {
+  display: flex;
+  flex-direction: column;
+  /* Высота от окна, а не от содержимого: вкладки должны стоять внизу экрана
+     даже на пустом каталоге, а не подниматься к заголовку. */
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.shop-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--topbar-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--line);
+}
+
+.shop-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.shop-count {
+  min-width: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Низ прокрутки: под вкладками и под главной кнопкой Telegram, которая висит
+   поверх страницы и о которой браузер ничего не знает. Без запаса последний
+   товар в списке оказывается наполовину под ней. */
+.shop-body {
+  flex: 1;
+  padding-bottom: 96px;
+}
+
+.shop-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+/* ── Поиск и категории ── */
+
+.shop-search {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 16px; /* меньше 16px — и iOS зумит страницу при фокусе */
+}
+
+.shop-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  /* Лента категорий уезжает за край экрана — полосу прокрутки прячем, жест
+     остаётся. Видимая полоса на телефоне только съедает высоту. */
+  scrollbar-width: none;
+}
+
+.shop-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.shop-chip {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.shop-chip.on {
+  background: var(--solid);
+  border-color: var(--solid);
+  color: var(--on-solid);
+}
+
+.shop-chip:disabled {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+/* ── Плитка товаров ── */
+
+.shop-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.shop-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.shop-tile-photo {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+}
+
+.shop-tile-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shop-tile-nophoto,
+.shop-tile-out {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.shop-tile-out {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 5px;
+  background: var(--plate);
+  color: var(--plate-text);
+  text-align: center;
+}
+
+.shop-tile-title {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--text);
+  /* Две строки на название: третья ломает ровную сетку плиток, а обрезать
+     на первой значит превратить «Кроссовки беговые мужские» в «Кроссовки». */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.shop-tile-price {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.shop-tile-old,
+.shop-old {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* ── Карточка товара ── */
+
+.shop-photo {
+  aspect-ratio: 1;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.shop-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shop-thumbs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.shop-thumb {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.shop-thumb.on {
+  border-color: var(--accent);
+}
+
+.shop-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.shop-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text);
+}
+
+.shop-price {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.shop-description {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+.shop-label {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.shop-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.shop-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--danger);
+}
+
+/* ── Корзина ── */
+
+.shop-cart {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shop-cart-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-soft);
+}
+
+.shop-cart-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.shop-cart-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.shop-cart-label {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.shop-cart-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.shop-cart-sum {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.shop-stepper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 999px;
+  background: var(--fill);
+}
+
+.shop-stepper button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.shop-stepper button:disabled {
+  opacity: 0.35;
+}
+
+.shop-stepper span {
+  min-width: 24px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* ── Промокод и итог ── */
+
+.shop-promo {
+  display: flex;
+  gap: 8px;
+}
+
+.shop-promo input {
+  flex: 1;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 16px;
+}
+
+.shop-promo-on {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-size: 14px;
+}
+
+.shop-total {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-soft);
+}
+
+.shop-total p {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.shop-total-discount {
+  color: var(--ok) !important;
+}
+
+.shop-total-final {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 17px !important;
+  font-weight: 600;
+  color: var(--text) !important;
+}
+
+/* ── Форма оформления ── */
+
+.shop-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.shop-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shop-field input {
+  height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 16px;
+}
+
+.shop-field input:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
+
+.shop-done {
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  text-align: center;
+}
+
+.shop-done-mark {
+  margin: 0;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--ok);
+  color: #fff;
+  font-size: 30px;
+}
+
+.shop-done-text {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* ── Мои заказы ── */
+
+.shop-order {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-soft);
+}
+
+.shop-order-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.shop-order-id {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.shop-order-date {
+  margin-left: 8px;
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.shop-order-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.shop-order-items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shop-order-ttn,
+.shop-order-total {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.shop-order-total {
+  font-weight: 600;
+  text-align: right;
+}
+
+/* ── Вкладки внизу ── */
+
+.shop-tabs {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  background: var(--topbar-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-top: 1px solid var(--line);
+  /* Запас под домашнюю полосу iPhone: без него нижний ряд кнопок попадает
+     ровно под неё, и первое нажатие уходит системе, а не странице. */
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.shop-tab {
+  position: relative;
+  min-height: 52px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.shop-tab.on {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.shop-tab-dot {
+  position: absolute;
+  top: 12px;
+  right: 50%;
+  transform: translateX(26px);
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+}

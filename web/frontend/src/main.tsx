@@ -7,6 +7,7 @@ import App from "./App";
 import { ConfirmProvider } from "./components/confirm";
 import { FlashProvider } from "./lib/flash";
 import "./styles/app.css";
+import "./styles/shop.css";
 
 /**
  * Общие правила для всех запросов.

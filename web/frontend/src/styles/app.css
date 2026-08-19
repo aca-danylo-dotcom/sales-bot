@@ -1828,6 +1828,112 @@ a.stat:hover .stat-value { color: var(--accent); }
   .data-grid { min-width: 620px; }
 }
 
+/* Вход в панель. Одна карточка посреди пустого экрана: показывать за формой
+   шапку с разделами, в которые всё равно не пустят, — дразнить. */
+.login {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.login-card h1 { margin: 0; font-size: 22px; }
+.login-card p { margin: 0; }
+
+.login-card input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 16px;
+}
+
+.login-card input:focus { outline: none; border-color: var(--accent-line); }
+.login-error { color: var(--danger); font-size: 14px; }
+
+/* Таблица телефонной ширины: строки становятся карточками.
+
+   Прокрутка вбок, которой хватало на планшете, на телефоне уводит из виду
+   половину колонок — а именно там, в конце строки, стоят сумма и статус, ради
+   которых заказ и открывают. Владелец теперь смотрит панель ещё и из
+   мини-приложения в Telegram, где экран узкий всегда.
+
+   Заголовки колонок при этом не пропадают, а переезжают в строки: подпись
+   берётся из `data-label` у ячейки (см. pages/Orders.tsx и соседние). Ячейка
+   без подписи — например, статус — занимает строку целиком.
+
+   Разметка остаётся таблицей: `display: block` меняет только раскладку, а
+   структура, ссылки и обработчик нажатия по строке работают как были. */
+@media (max-width: 640px) {
+  .table-wrap { overflow-x: visible; padding: 0; }
+
+  .data-grid,
+  .data-grid tbody,
+  .data-grid tr,
+  .data-grid td {
+    display: block;
+    min-width: 0;
+    width: auto;
+  }
+
+  /* Шапка не прячется `display: none` — это выкинуло бы её и из озвучки
+     программой чтения с экрана. Убираем визуально, оставляя в потоке. */
+  .data-grid thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .data-grid tbody tr {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .data-grid tbody tr:last-child { border-bottom: none; }
+
+  .data-grid td {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 4px 12px;
+    padding: 3px 0;
+    border-bottom: none;
+    text-align: left;
+  }
+
+  .data-grid td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  /* Числа перестают быть колонкой — выравнивать их по правому краю больше
+     не нужно, они и так стоят напротив своей подписи. */
+  .data-grid td.num { text-align: left; }
+
+  /* Мелкая вторая строка внутри ячейки — телефон под именем, дата под номером
+     заказа. Она занимает всю ширину и уходит под значение, а не встаёт с ним
+     в один ряд: втроём с подписью колонки они не помещаются даже на «Заказ». */
+  .data-grid td .small {
+    flex: 1 0 100%;
+    text-align: right;
+  }
+}
+
 /* Телефон. */
 @media (max-width: 640px) {
   .page { padding: 24px 16px 56px; }

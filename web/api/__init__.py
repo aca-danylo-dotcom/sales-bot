@@ -19,13 +19,18 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from web.api import notifications, orders, products, stats, summary
+from web.api import notifications, orders, products, session, shop, stats, summary
 
 
 def setup_routes(app: web.Application) -> None:
     """Все роуты API. Порядок важен только внутри модулей (см. products)."""
+    # Вход — первым: остальные разделы за ним и открываются.
+    session.setup_routes(app)
     summary.setup_routes(app)
     orders.setup_routes(app)
     products.setup_routes(app)
     notifications.setup_routes(app)
     stats.setup_routes(app)
+    # Магазин для покупателя. Свой префикс /api/shop/ — по нему web/auth.py и
+    # отличает витрину от панели: у них разные правила доступа.
+    shop.setup_routes(app)

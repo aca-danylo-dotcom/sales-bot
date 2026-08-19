@@ -27,6 +27,7 @@ from aiohttp import web
 
 import config
 from web import api
+from web.auth import telegram_identity
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +106,11 @@ async def index(request: web.Request) -> web.FileResponse:  # noqa: ARG001
 
 
 def create_app(bot=None) -> web.Application:
+    # Порядок middleware: сначала проверка чужой страницы, потом — кто пришёл.
+    # Запрос с подделанного адреса незачем даже опознавать.
     app = web.Application(
-        client_max_size=MAX_UPLOAD_BYTES, middlewares=[same_origin_only]
+        client_max_size=MAX_UPLOAD_BYTES,
+        middlewares=[same_origin_only, telegram_identity],
     )
     app["bot"] = bot
 

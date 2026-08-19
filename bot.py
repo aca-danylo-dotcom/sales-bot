@@ -16,6 +16,8 @@ import logging
 import signal
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramAPIError
+from aiogram.types import MenuButtonDefault, MenuButtonWebApp, WebAppInfo
 
 import config
 from db.database import init_db
@@ -25,6 +27,7 @@ from handlers.admin import router as admin_router
 from handlers.catalog import router as catalog_router
 from handlers.client import router as client_router
 from handlers.orders import router as orders_router
+from handlers.payments import router as payments_router
 from web.app import start_web
 
 logging.basicConfig(
@@ -34,6 +37,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 dp = Dispatcher()
+# Оплата — самой первой: pre_checkout_query Telegram ждёт ответа 10 секунд, и
+# события платежа не должны стоять в очереди за разбором свободного текста.
+dp.include_router(payments_router)
 dp.include_router(admin_router)
 # Корзина и оформление — между админкой и ИИ: кнопки «Корзина» и «Мои заказы»
 # приходят обычным текстом, и клиентский роутер отдал бы их модели.
@@ -42,6 +48,32 @@ dp.include_router(orders_router)
 # репликой, и она вместо витрины начинает уточнять, что именно нужно.
 dp.include_router(catalog_router)
 dp.include_router(client_router)
+
+
+async def _setup_menu_button(bot: Bot) -> None:
+    """Ставит витрину на кнопку меню — ту, что слева от поля ввода.
+
+    Настройка глобальная и живёт на стороне Telegram: выставили один раз — и
+    она остаётся у всех, кто открывает бота. Поэтому её обязательно нужно
+    СНИМАТЬ, когда адрес убрали из настроек: иначе кнопка продолжит вести на
+    выключенное приложение, и человек упрётся в пустой экран.
+
+    Ошибку глушим: бот без кнопки работает полностью, а падать на старте
+    из-за оформления — значит остаться совсем без магазина.
+    """
+    try:
+        if config.webapp_enabled():
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="Магазин", web_app=WebAppInfo(url=config.WEBAPP_URL)
+                )
+            )
+            logger.info("Мини-приложение подключено: %s", config.WEBAPP_URL)
+        else:
+            await bot.set_chat_menu_button(menu_button=MenuButtonDefault())
+            logger.info("WEBAPP_URL не задан — кнопка магазина не показывается.")
+    except TelegramAPIError:
+        logger.exception("Не удалось настроить кнопку меню")
 
 
 def _stop_on_signals() -> None:
@@ -83,6 +115,8 @@ async def main() -> None:
         logger.info("Отчёт в Agent Stats включён: %s", agent_stats.BASE_URL)
     else:
         logger.info("Отчёт в Agent Stats выключен (нет AGENT_STATS_URL/AGENT_STATS_KEY).")
+
+    await _setup_menu_button(bot)
 
     # Планировщик поднимаем до polling: он возвращает на склад товар из
     # заказов, которые так и не оплатили.

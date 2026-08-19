@@ -173,7 +173,7 @@ export default function Orders() {
                       `/orders/${order.id}${buildQuery({ ...filters, page: page > 1 ? page : "" })}`,
                     )}
                   >
-                    <td>
+                    <td data-label="Заказ">
                       {/* Фильтры едут в карточку, чтобы «← Все заказы» вернул
                           в тот же список, а не в начало. */}
                       <Link className="strong" to={`/orders/${order.id}${buildQuery({ ...filters, page: page > 1 ? page : "" })}`}>
@@ -183,21 +183,21 @@ export default function Orders() {
                         {stamp(order.created_at)} · {order.units_count} шт
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Получатель">
                       {order.name || "—"}
                       <span className="muted small">{order.phone || ""}</span>
                     </td>
-                    <td>
+                    <td data-label="Доставка">
                       {order.city || "—"}
                       <span className="muted small">
                         {order.ttn ? `ТТН ${order.ttn}` : order.np_branch || ""}
                       </span>
                     </td>
-                    <td className="num">{order.total_text}</td>
+                    <td className="num" data-label="Сумма">{order.total_text}</td>
                     <td>
                       <Tag kind={`st-${order.status}`}>{order.status_short}</Tag>
                     </td>
-                    <td className="muted small">{order.assignee || "—"}</td>
+                    <td className="muted small" data-label="Ведёт">{order.assignee || "—"}</td>
                   </tr>
                 ))}
               </tbody>

@@ -156,14 +156,14 @@ export default function Products() {
                         {product.sku ? ` · ${product.sku}` : ""}
                       </span>
                     </td>
-                    <td>{product.category || "—"}</td>
-                    <td className="num">
+                    <td data-label="Категория">{product.category || "—"}</td>
+                    <td className="num" data-label="Цена">
                       {product.price_text}
                       {product.old_price_text ? (
                         <span className="muted small strike">{product.old_price_text}</span>
                       ) : null}
                     </td>
-                    <td className="num">
+                    <td className="num" data-label="Остаток">
                       {product.variants_count ? (
                         <>
                           <span className={product.total_stock ? "" : "danger"}>

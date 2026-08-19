@@ -78,6 +78,47 @@ def looks_like_name(text: str | None) -> bool:
     )
 
 
+# Из номера выбрасываем всё, кроме цифр и плюса: скобки, дефисы и пробелы
+# человек ставит как привык, а курьеру нужен один вид записи.
+_PHONE_CLEAN_RE = re.compile(r"[^\d+]")
+
+
+def clean_phone(text: str) -> str | None:
+    """Нормализует номер к виду +380XXXXXXXXX. None — если это не телефон.
+
+    Лежит здесь, а не в оформлении заказа, потому что номер теперь приходит с
+    двух сторон: из чата (кнопка «Поделиться контактом» или руками) и из
+    мини-приложения. Записать их по-разному нельзя — в карточке заказа это
+    выглядело бы как два разных клиента.
+    """
+    cleaned = _PHONE_CLEAN_RE.sub("", text or "")
+    plus = cleaned.startswith("+")
+    digits = cleaned.lstrip("+").replace("+", "")
+    if not digits.isdigit():
+        return None
+
+    if not plus:
+        # Локальные записи украинских номеров: 0XXXXXXXXX и 80XXXXXXXXX
+        if len(digits) == 10 and digits.startswith("0"):
+            digits = "38" + digits
+        elif len(digits) == 11 and digits.startswith("80"):
+            digits = "3" + digits
+    if not 10 <= len(digits) <= 15:
+        return None
+    return "+" + digits
+
+
+# Отделение Новой Почты всегда с номером: «12», «№12», «Поштомат 4521».
+# Без цифры это не адрес доставки, а фраза вроде «как обычно» или «на твоё
+# усмотрение» — по такой строке посылку не отправить.
+_BRANCH_DIGIT_RE = re.compile(r"\d")
+
+
+def looks_like_branch(text: str | None) -> bool:
+    """Похоже ли это на отделение почты — то есть есть ли в строке номер."""
+    return bool(_BRANCH_DIGIT_RE.search(text or ""))
+
+
 def variant_label(variant: dict) -> str:
     """«12 oz / чёрный», «42», «чёрный» — то из размера и цвета, что заполнено."""
     parts = [part for part in (variant.get("size"), variant.get("color")) if part]

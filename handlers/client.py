@@ -188,11 +188,14 @@ def _pick_photo(sizes: list[PhotoSize]) -> PhotoSize:
 
 
 async def _download_image(bot: Bot, photo: PhotoSize) -> str:
-    """Снимок → data-URI: картинку модель принимает только так, файлом её не отдать."""
+    """Снимок → base64: картинку модель принимает только так, файлом её не отдать.
+
+    Голая строка base64, без приставки «data:image/jpeg;base64,» — тип
+    картинки Claude ждёт отдельным полем, а не внутри данных (см. _photo_block
+    ниже). Telegram пережимает присланные фото в JPEG, поэтому тип фиксирован.
+    """
     buffer = await bot.download(photo)
-    data = buffer.read()
-    # Telegram пережимает присланные фото в JPEG, поэтому тип фиксированный.
-    return "data:image/jpeg;base64," + base64.b64encode(data).decode()
+    return base64.b64encode(buffer.read()).decode()
 
 
 def _incoming_text(message: Message) -> str:
@@ -740,11 +743,20 @@ async def _run_and_reply(message: Message, bot: Bot, image: str | None = None) -
         # модель вместо неё уходит сам снимок: картинка живёт только в этом
         # запросе, в историю она не сохраняется и в следующих сообщениях модель
         # её уже не видит (второй раз платить за тот же кадр незачем).
+        # Картинка идёт ПЕРЕД текстом: так её советует ставить Anthropic —
+        # модель сначала смотрит, потом читает вопрос о том, что увидела.
         conv[-1] = {
             "role": "user",
             "content": [
-                {"type": "input_text", "text": _photo_intro(message)},
-                {"type": "input_image", "image_url": image},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": image,
+                    },
+                },
+                {"type": "text", "text": _photo_intro(message)},
             ],
         }
 

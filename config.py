@@ -65,17 +65,20 @@ def _require(name: str) -> str:
 BOT_TOKEN: str = _require("BOT_TOKEN")
 ADMIN_ID: int = int(_require("ADMIN_ID"))
 
-# --- ИИ-консультант (провайдер kie.ai, формат OpenAI Responses API) ---
-AI_API_KEY: str = os.getenv("AI_API_KEY", "")
-AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://api.kie.ai/codex/v1")
-AI_MODEL: str = os.getenv("AI_MODEL", "gpt-5-5")
-AI_REASONING_EFFORT: str = os.getenv("AI_REASONING_EFFORT", "low")  # low/medium/high/xhigh
+# --- ИИ-консультант (Anthropic, модель Claude) ---
+# Ключ берётся из ANTHROPIC_API_KEY — так его называет сам провайдер и его
+# библиотека. Старое имя AI_API_KEY тоже принимается: под ним ключ лежит на
+# хостинге с прежних времён, и переезд не должен требовать переименования
+# переменной одновременно с обновлением кода.
+AI_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "") or os.getenv("AI_API_KEY", "")
+AI_MODEL: str = os.getenv("AI_MODEL", "claude-haiku-4-5")
 
 # Цены модели за миллион токенов — из них считается себестоимость одного ответа
-# для дашборда статистики. Валюта любая, лишь бы одна во всех агентах агентства.
-# Ноль (по умолчанию) — расход в статистике будет, себестоимость нулевая.
-AI_PRICE_IN: float = float(os.getenv("AI_PRICE_IN", "0"))    # за 1M входных токенов
-AI_PRICE_OUT: float = float(os.getenv("AI_PRICE_OUT", "0"))  # за 1M выходных токенов
+# для дашборда статистики. По умолчанию стоят цены Claude Haiku 4.5 ($1 за
+# миллион входных, $5 за миллион выходных): менять их нужно вместе с моделью,
+# иначе расход в статистике станет выдумкой.
+AI_PRICE_IN: float = float(os.getenv("AI_PRICE_IN", "1"))    # за 1M входных токенов
+AI_PRICE_OUT: float = float(os.getenv("AI_PRICE_OUT", "5"))  # за 1M выходных токенов
 
 # Суточные потолки платных запросов к модели (счётчик — в таблице ai_usage).
 # Минутный лимит частоты (см. handlers/client.py) спасает от очереди сообщений

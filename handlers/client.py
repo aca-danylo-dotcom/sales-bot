@@ -276,9 +276,9 @@ async def _daily_ok(message: Message, bot: Bot, user_id: int) -> bool:
                 logger.exception("Не удалось предупредить владельца о лимите ИИ")
         if _should_warn(user_id):
             await message.answer(
-                "Извините, сегодня я уже не справляюсь с потоком сообщений. "
-                "Напишите, пожалуйста, завтра — или оставьте вопрос, менеджер "
-                "ответит вам сам 🙏",
+                "Вибачте, сьогодні я вже не справляюся з потоком повідомлень. "
+                "Напишіть, будь ласка, завтра — або залиште питання, менеджер "
+                "відповість вам сам 🙏",
                 reply_markup=main_menu(),
             )
         return False
@@ -306,9 +306,9 @@ async def _daily_ok(message: Message, bot: Bot, user_id: int) -> bool:
             except Exception:  # владелец мог заблокировать бота
                 logger.exception("Не удалось предупредить владельца о лимите клиента")
             await message.answer(
-                "На сегодня мы с вами наговорились 🙂 Я отвечу завтра — "
-                "а если вопрос срочный, напишите его одним сообщением, "
-                "менеджер прочитает.",
+                "На сьогодні ми з вами наговорилися 🙂 Я відповім завтра — "
+                "а якщо питання термінове, напишіть його одним повідомленням, "
+                "менеджер прочитає.",
                 reply_markup=main_menu(),
             )
         return False
@@ -331,7 +331,9 @@ _TITLE_STOP_WORDS = frozenset({"для", "від", "или", "под", "про",
 # Список нарочно узкий: одно только «покажи» сюда не входит, иначе «покажи 43-й»
 # снова тащило бы карточку, от чего мы и уходим.
 _PHOTO_REQUEST_RE = re.compile(
-    r"фот|картинк|изображен|зображен|снимок|снимк|как выглядит|як вигляда", re.IGNORECASE
+    r"фот|картинк|зображен|изображен|знімок|знімк|снимок|снимк|"
+    r"як вигляда|как выглядит",
+    re.IGNORECASE,
 )
 
 
@@ -343,7 +345,7 @@ def _asks_for_photo(text: str) -> bool:
 # Просьба посмотреть товар: «покажите», «давай посмотрю», «глянуть бы». Слова
 # про само изображение сюда не входят — они в _PHOTO_REQUEST_RE выше и дают
 # безусловный повтор. Здесь повтор мягкий, с коротким окном.
-_SHOW_REQUEST_RE = re.compile(r"покаж|показ|посмотр|подив|глян", re.IGNORECASE)
+_SHOW_REQUEST_RE = re.compile(r"покаж|показ|подив|посмотр|глян", re.IGNORECASE)
 
 
 def _repeat_window(text: str) -> float:
@@ -520,14 +522,14 @@ async def cmd_start(message: Message) -> None:
     # Кнопка «Магазин» стоит слева от поля ввода — место заметное, но привычки
     # смотреть туда у людей нет, и без слов её попросту не находят.
     shop_line = (
-        "\n\nА весь каталог с фото — кнопка «Магазин» слева от поля ввода."
+        "\n\nА весь каталог із фото — кнопка «Магазин» ліворуч від поля введення."
         if config.webapp_enabled()
         else ""
     )
     await message.answer(
-        f"Здравствуйте! Это {config.SHOP_NAME}, {config.SHOP_CITY}.\n\n"
-        "Спрашивайте что угодно: подберу размер, покажу фото, скажу что есть "
-        f"в наличии.{shop_line}",
+        f"Вітаю! Це {config.SHOP_NAME}, {config.SHOP_CITY}.\n\n"
+        "Питайте що завгодно: підберу розмір, покажу фото, скажу що є "
+        f"в наявності.{shop_line}",
         reply_markup=main_menu(),
     )
 
@@ -549,25 +551,26 @@ async def cmd_email(message: Message) -> None:
     if not argument:
         if current:
             await message.answer(
-                f"Ваша почта для напоминаний: {current}\n\n"
-                f"Поменять — «/email новый@адрес», убрать — «/email off».",
+                f"Ваша пошта для нагадувань: {current}\n\n"
+                f"Змінити — «/email новий@адреса», прибрати — «/email off».",
                 reply_markup=main_menu(),
             )
         else:
             await message.answer(
-                "Почта не указана — я пишу только сюда, в Telegram.\n\n"
-                "Хотите получать напоминания и промокоды ещё и на почту — "
-                "отправьте «/email ваш@адрес». Это по желанию: без неё всё "
-                "работает как обычно.",
+                "Пошту не вказано — я пишу тільки сюди, у Telegram.\n\n"
+                "Хочете отримувати нагадування й промокоди ще й на пошту — "
+                "надішліть «/email ваш@адреса». Це за бажанням: без неї все "
+                "працює як зазвичай.",
                 reply_markup=main_menu(),
             )
         return
 
-    if argument.lower() in ("off", "нет", "убрать", "удалить", "-"):
+    if argument.lower() in ("off", "ні", "нет", "прибрати", "убрать",
+                            "видалити", "удалить", "-"):
         await queries.update_client(message.from_user.id, email="")
         await message.answer(
-            "Убрал почту — писем больше не будет. Напоминания останутся только "
-            "здесь, в чате.",
+            "Прибрав пошту — листів більше не буде. Нагадування лишаться тільки "
+            "тут, у чаті.",
             reply_markup=main_menu(),
         )
         return
@@ -575,15 +578,15 @@ async def cmd_email(message: Message) -> None:
     address = mail.normalize_email(argument)
     if not mail.looks_like_email(address):
         await message.answer(
-            "Это не похоже на адрес почты. Напишите так: «/email ivan@example.com».",
+            "Це не схоже на адресу пошти. Напишіть так: «/email ivan@example.com».",
             reply_markup=main_menu(),
         )
         return
 
     await queries.update_client(message.from_user.id, email=address)
     await message.answer(
-        f"Записал почту: {address}\n\n"
-        f"Буду присылать туда напоминания и промокоды. Передумаете — «/email off».",
+        f"Записав пошту: {address}\n\n"
+        f"Надсилатиму туди нагадування й промокоди. Передумаєте — «/email off».",
         reply_markup=main_menu(),
     )
 
@@ -608,26 +611,26 @@ async def _try_promo(message: Message) -> bool:
 
         if result == "ok":
             await message.answer(
-                f"Промокод принят: скидка {promo['percent']}% ✅\n\n"
-                f"Она посчитается сама, когда будете оформлять заказ — "
-                f"отдельно ничего вводить не нужно.",
+                f"Промокод прийнято: знижка {promo['percent']}% ✅\n\n"
+                f"Вона порахується сама, коли оформлятимете замовлення — "
+                f"окремо нічого вводити не потрібно.",
                 reply_markup=main_menu(),
             )
         elif result == "active":
             await message.answer(
-                f"Этот промокод уже у вас применён — скидка {promo['percent']}% "
-                f"посчитается при оформлении заказа 🙂",
+                f"Цей промокод у вас уже застосовано — знижка {promo['percent']}% "
+                f"порахується при оформленні замовлення 🙂",
                 reply_markup=main_menu(),
             )
         elif result == "used":
             await message.answer(
-                "Этот промокод уже потрачен на прошлый заказ — он одноразовый.",
+                "Цей промокод уже витрачено на минуле замовлення — він одноразовий.",
                 reply_markup=main_menu(),
             )
         else:  # expired
             await message.answer(
-                "Срок этого промокода вышел 😔 Но напишите, что ищете, — подберу "
-                "и подскажу, что есть сейчас.",
+                "Термін цього промокоду вийшов 😔 Але напишіть, що шукаєте, — "
+                "підберу й підкажу, що є зараз.",
                 reply_markup=main_menu(),
             )
         return True
@@ -650,8 +653,8 @@ async def on_text(message: Message, bot: Bot) -> None:
     # чтобы случайная «простыня» не тратила попытку клиента.
     if len(message.text) > _MAX_INPUT_CHARS:
         await message.answer(
-            "Многовато текста получилось 🙂 Напишите покороче: что ищете, какой "
-            "размер и цвет — так я быстрее подберу.",
+            "Забагато тексту вийшло 🙂 Напишіть коротше: що шукаєте, який "
+            "розмір і колір — так я швидше підберу.",
             reply_markup=main_menu(),
         )
         return
@@ -659,8 +662,8 @@ async def on_text(message: Message, bot: Bot) -> None:
     if not _rate_ok(user_id):
         if _should_warn(user_id):
             await message.answer(
-                "Слишком много сообщений подряд — я не успеваю. Напишите, "
-                "пожалуйста, через минуту.",
+                "Забагато повідомлень поспіль — я не встигаю. Напишіть, "
+                "будь ласка, за хвилину.",
                 reply_markup=main_menu(),
             )
         return
@@ -690,8 +693,8 @@ async def on_photo(message: Message, bot: Bot) -> None:
 
     if len(message.caption or "") > _MAX_INPUT_CHARS:
         await message.answer(
-            "Многовато текста под фото 🙂 Напишите покороче: что ищете, какой "
-            "размер и цвет — так я быстрее подберу.",
+            "Забагато тексту під фото 🙂 Напишіть коротше: що шукаєте, який "
+            "розмір і колір — так я швидше підберу.",
             reply_markup=main_menu(),
         )
         return
@@ -699,8 +702,8 @@ async def on_photo(message: Message, bot: Bot) -> None:
     if not _rate_ok(user_id):
         if _should_warn(user_id):
             await message.answer(
-                "Слишком много сообщений подряд — я не успеваю. Напишите, "
-                "пожалуйста, через минуту.",
+                "Забагато повідомлень поспіль — я не встигаю. Напишіть, "
+                "будь ласка, за хвилину.",
                 reply_markup=main_menu(),
             )
         return
@@ -708,8 +711,8 @@ async def on_photo(message: Message, bot: Bot) -> None:
     photo = _pick_photo(message.photo)
     if (photo.file_size or 0) > _PHOTO_MAX_BYTES:
         await message.answer(
-            "Фото слишком тяжёлое, у меня не открывается. Пришлите, пожалуйста, "
-            "обычным снимком (не файлом) — или опишите словами, что ищете.",
+            "Фото завелике, у мене не відкривається. Надішліть, будь ласка, "
+            "звичайним знімком (не файлом) — або опишіть словами, що шукаєте.",
             reply_markup=main_menu(),
         )
         return
@@ -722,8 +725,8 @@ async def on_photo(message: Message, bot: Bot) -> None:
     except Exception as error:
         logger.exception("Не удалось скачать фото клиента %s", user_id)
         await message.answer(
-            "Не получилось рассмотреть фото 🙈 Пришлите, пожалуйста, ещё раз — "
-            "или расскажите словами, что ищете.",
+            "Не вдалося роздивитися фото 🙈 Надішліть, будь ласка, ще раз — "
+            "або розкажіть словами, що шукаєте.",
             reply_markup=main_menu(),
         )
         agent_stats.report_error("photo_download", str(error))
@@ -800,8 +803,8 @@ async def _run_and_reply(message: Message, bot: Bot, image: str | None = None) -
         # стоит по-человечески: клиент вернётся, а не решит, что бот сломан.
         logger.warning("Провайдер ИИ недоступен, отвечаем клиенту %s мягко", user_id)
         await message.answer(
-            "Извините, у меня сейчас технический перерыв — не могу посмотреть "
-            "каталог. Напишите, пожалуйста, через несколько минут, я всё подберу 🙏",
+            "Вибачте, у мене зараз технічна перерва — не можу подивитися "
+            "каталог. Напишіть, будь ласка, за кілька хвилин, я все підберу 🙏",
             reply_markup=main_menu(),
         )
         _report_escalated(message, user_id)
@@ -809,7 +812,7 @@ async def _run_and_reply(message: Message, bot: Bot, image: str | None = None) -
     except Exception as error:
         logger.exception("Ошибка агента для пользователя %s", user_id)
         await message.answer(
-            "Что-то у меня не сложилось с ответом. Напишите, пожалуйста, ещё раз 🙏",
+            "Щось у мене не склалося з відповіддю. Напишіть, будь ласка, ще раз 🙏",
             reply_markup=main_menu(),
         )
         agent_stats.report_error("agent_failure", str(error))
@@ -837,7 +840,7 @@ async def _run_and_reply(message: Message, bot: Bot, image: str | None = None) -
         await queries.add_message(user_id, "assistant", reply)
         await queries.trim_history(user_id, _KEEP_HISTORY)
     elif ctx.cart_added:
-        await message.answer("Положил в корзину.", reply_markup=added_kb())
+        await message.answer("Поклав у кошик.", reply_markup=added_kb())
 
     for product in cards:
         await send_product_card(message, product)

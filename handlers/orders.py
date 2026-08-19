@@ -71,7 +71,7 @@ from keyboards.orders import (
 )
 from services import agent_stats, mail, payments
 from services.format import (
-    ORDER_STATUS_RU,
+    ORDER_STATUS_UA,
     clean_phone,
     looks_like_branch,
     looks_like_name,
@@ -156,19 +156,19 @@ _NEXT_FIELD = {
 }
 
 _PROMPTS = {
-    "name": "На чьё имя оформляем? Напишите имя и фамилию получателя.",
-    "phone": ("Нужен номер телефона — по нему свяжется курьер.\n"
-              "Нажмите кнопку ниже или напишите номер вручную."),
-    "city": "В какой город доставляем?",
-    "np_branch": ("Номер отделения Новой Почты — например «12» или «Поштомат 4521».\n"
-                  "Можно дописать улицу, но номер нужен обязательно."),
-    "comment": "Комментарий к заказу — если есть. Или нажмите «Пропустить».",
+    "name": "На чиє ім'я оформлюємо? Напишіть ім'я та прізвище одержувача.",
+    "phone": ("Потрібен номер телефона — за ним зв'яжеться кур'єр.\n"
+              "Натисніть кнопку нижче або напишіть номер вручну."),
+    "city": "У яке місто доставляємо?",
+    "np_branch": ("Номер відділення Нової Пошти — наприклад «12» або «Поштомат 4521».\n"
+                  "Можна дописати вулицю, але номер потрібен обов'язково."),
+    "comment": "Коментар до замовлення — якщо є. Або натисніть «Пропустити».",
     # Почта — единственный необязательный контакт, и сказано об этом прямо.
     # Доставку она ни на что не меняет: адрес и телефон уже собраны выше, а
     # заказ ведётся здесь, в чате. Нужна она только для напоминаний, и человек
     # должен видеть, что «Пропустить» — нормальный ответ, а не отказ от заказа.
-    "email": ("Почта — если хотите получать напоминания и промокоды ещё и на неё.\n"
-              "Это по желанию: нажмите «Пропустить», и всё останется здесь, в чате."),
+    "email": ("Пошта — якщо хочете отримувати нагадування й промокоди ще й на неї.\n"
+              "Це за бажанням: натисніть «Пропустити», і все лишиться тут, у чаті."),
 }
 
 # Шаги, которые можно пропустить кнопкой. Комментарий к заказу и почта — оба
@@ -186,24 +186,24 @@ _PROFILE_FIELDS = ("name", "phone", "city", "np_branch")
 def cart_text(cart: dict) -> str:
     """Корзина списком с итогом. Отдельно помечает то, что разобрали."""
     if not cart["items"]:
-        return ("🧺 Корзина пуста.\n\n"
-                "Напишите, что ищете — подберу и положу в корзину.")
+        return ("🧺 Кошик порожній.\n\n"
+                "Напишіть, що шукаєте — підберу й покладу в кошик.")
 
-    lines = ["<b>🧺 Ваша корзина</b>", ""]
+    lines = ["<b>🧺 Ваш кошик</b>", ""]
     for number, item in enumerate(cart["items"], 1):
         lines.append(f"{number}. {_esc(item['title'])} — {_esc(variant_label(item))}")
         lines.append(f"    {item['qty']} × {money(item['price'])} = {money(item['sum'])}")
         if not item["is_active"] or item["stock"] < item["qty"]:
             left = item["stock"] if item["is_active"] else 0
-            lines.append(f"    ⚠️ доступно только {left} шт — уменьшите количество")
-    lines += ["", f"<b>Итого: {money(cart['total'])}</b>"]
+            lines.append(f"    ⚠️ доступно лише {left} шт — зменшіть кількість")
+    lines += ["", f"<b>Разом: {money(cart['total'])}</b>"]
     return "\n".join(lines)
 
 
 def order_items_text(order: dict) -> str:
     lines = []
     for number, item in enumerate(order["items"], 1):
-        label = " / ".join(p for p in (item["size"], item["color"]) if p) or "один вариант"
+        label = " / ".join(p for p in (item["size"], item["color"]) if p) or "один варіант"
         lines.append(
             f"{number}. {_esc(item['title_snapshot'])} — {_esc(label)}\n"
             f"    {item['qty']} × {money(item['price_snapshot'])} = {money(item['sum'])}"
@@ -220,28 +220,29 @@ def order_items_text(order: dict) -> str:
 def client_confirmed_text(order: dict) -> str:
     """Оплата подтверждена, заказ пошёл в сборку."""
     return (
-        f"✅ Оплата по заказу №{order['id']} получена, спасибо!\n\n"
+        f"✅ Оплату за замовлення №{order['id']} отримано, дякуємо!\n\n"
         f"{order_items_text(order)}\n\n"
-        f"Собираем заказ и отправляем Новой Почтой — номер накладной пришлём сюда же."
+        f"Збираємо замовлення й відправляємо Новою Поштою — номер накладної "
+        f"надішлемо сюди ж."
     )
 
 
 def client_shipped_text(order: dict, ttn: str) -> str:
     """Посылка уехала. Накладная отдельной строкой — её копируют в трекер."""
     return (
-        f"🚚 Заказ №{order['id']} отправлен Новой Почтой.\n\n"
-        f"Накладная: <code>{_esc(ttn)}</code>\n\n"
-        f"Отследить посылку можно по этому номеру в приложении или на сайте "
-        f"Новой Почты. Спасибо за покупку!"
+        f"🚚 Замовлення №{order['id']} відправлено Новою Поштою.\n\n"
+        f"Накладна: <code>{_esc(ttn)}</code>\n\n"
+        f"Відстежити посилку можна за цим номером у застосунку або на сайті "
+        f"Нової Пошти. Дякуємо за покупку!"
     )
 
 
 def client_payment_missing_text(order: dict) -> str:
     """Оплату не нашли — заказ отменён, товар вернулся на витрину."""
     return (
-        f"К сожалению, оплату по заказу №{order['id']} на {money(order['total'])} "
-        f"мы не нашли, поэтому заказ отменён — товар вернулся на витрину.\n\n"
-        f"Если оплата всё-таки прошла, напишите сюда: разберёмся и оформим заново 🙏"
+        f"На жаль, оплату за замовлення №{order['id']} на {money(order['total'])} "
+        f"ми не знайшли, тому замовлення скасовано — товар повернувся на вітрину.\n\n"
+        f"Якщо оплата все ж пройшла, напишіть сюди: розберемось і оформимо заново 🙏"
     )
 
 
@@ -249,8 +250,8 @@ def client_cancelled_text(order: dict) -> str:
     """Отмена по решению менеджера. Причину пишем внутрь заказа, а не клиенту:
     в заметке бывает «дозвониться не смогли, товар битый» — это не текст письма."""
     return (
-        f"Заказ №{order['id']} отменён, товар вернулся на витрину.\n\n"
-        f"Если это недоразумение — напишите сюда, оформим заново 🙏"
+        f"Замовлення №{order['id']} скасовано, товар повернувся на вітрину.\n\n"
+        f"Якщо це непорозуміння — напишіть сюди, оформимо заново 🙏"
     )
 
 
@@ -264,21 +265,21 @@ def _discount_line(order: dict) -> str:
     if not discount:
         return ""
     code = order.get("promo_code") or ""
-    return f"Скидка по промокоду {_esc(code)}: −{money(discount)}\n"
+    return f"Знижка за промокодом {_esc(code)}: −{money(discount)}\n"
 
 
 def payment_text(order: dict) -> str:
     """Реквизиты для оплаты. Берутся из config и в промпт ИИ не попадают."""
     return (
-        f"<b>Заказ №{order['id']} оформлен.</b>\n\n"
+        f"<b>Замовлення №{order['id']} оформлено.</b>\n\n"
         f"{_discount_line(order)}"
-        f"К оплате: <b>{money(order['total'])}</b>\n\n"
-        f"Карта: <code>{_esc(config.PAYMENT_CARD)}</code>\n"
-        f"Получатель: {_esc(config.PAYMENT_CARD_HOLDER)}\n\n"
-        f"После оплаты нажмите «Я оплатил» — мы проверим поступление и "
-        f"подтвердим заказ.\n"
-        f"Заказ ждёт оплаты {config.ORDER_PAYMENT_TIMEOUT_HOURS} ч, "
-        f"потом отменяется автоматически и товар возвращается на витрину."
+        f"До сплати: <b>{money(order['total'])}</b>\n\n"
+        f"Картка: <code>{_esc(config.PAYMENT_CARD)}</code>\n"
+        f"Отримувач: {_esc(config.PAYMENT_CARD_HOLDER)}\n\n"
+        f"Після оплати натисніть «Я оплатив» — ми перевіримо надходження й "
+        f"підтвердимо замовлення.\n"
+        f"Замовлення чекає на оплату {config.ORDER_PAYMENT_TIMEOUT_HOURS} год, "
+        f"потім скасовується автоматично і товар повертається на вітрину."
     )
 
 
@@ -336,7 +337,7 @@ def _summary_text(cart: dict, data: dict, *, tail: str = "",
     ищет глазами, применился он или нет, и «узнаете после оформления» — худший
     из возможных ответов.
     """
-    lines = ["<b>Проверьте заказ</b>", ""]
+    lines = ["<b>Перевірте замовлення</b>", ""]
     for number, item in enumerate(cart["items"], 1):
         lines.append(f"{number}. {_esc(item['title'])} — {_esc(variant_label(item))}")
         lines.append(f"    {item['qty']} × {money(item['price'])} = {money(item['sum'])}")
@@ -347,7 +348,7 @@ def _summary_text(cart: dict, data: dict, *, tail: str = "",
         discount = round(cart["total"] * promo["percent"] / 100, 2)
         lines += [
             "",
-            f"Сумма: {money(cart['total'])}",
+            f"Сума: {money(cart['total'])}",
             f"Промокод {_esc(promo['code'])} (−{promo['percent']}%): −{money(discount)}",
         ]
         total_text = money(round(cart["total"] - discount, 2))
@@ -356,28 +357,28 @@ def _summary_text(cart: dict, data: dict, *, tail: str = "",
 
     lines += [
         "",
-        f"<b>Итого: {total_text}</b>",
+        f"<b>Разом: {total_text}</b>",
         "",
-        f"Получатель: {_esc(data.get('name', ''))}",
+        f"Отримувач: {_esc(data.get('name', ''))}",
         f"Телефон: {_esc(data.get('phone', ''))}",
         "",
         # Адрес отдельным блоком и жирным: именно его чаще всего и не замечают
         # в общем списке, а потом посылка уезжает не в то отделение.
-        "<b>📦 Куда везём:</b>",
-        f"<b>{_esc(data.get('city', ''))}, отделение "
+        "<b>📦 Куди веземо:</b>",
+        f"<b>{_esc(data.get('city', ''))}, відділення "
         f"{_esc(data.get('np_branch', ''))}</b>",
     ]
     if data.get("comment"):
         lines.append("")
-        lines.append(f"Комментарий: {_esc(data['comment'])}")
-    lines += ["", tail or "Всё верно? Если адрес не тот — «Ввести данные заново»."]
+        lines.append(f"Коментар: {_esc(data['comment'])}")
+    lines += ["", tail or "Усе вірно? Якщо адреса не та — «Ввести дані заново»."]
     return "\n".join(lines)
 
 
 # Хвост экрана повторного заказа. Формы здесь не будет ни в каком случае:
 # «Оставить эти данные» сразу оформляет заказ.
-_SAVED_TAIL = ("Это данные вашего прошлого заказа. Оставляем их — и оформляю "
-               "заказ. Что-то поменялось — «Поменять данные».")
+_SAVED_TAIL = ("Це дані вашого минулого замовлення. Залишаємо їх — і оформлюю "
+               "замовлення. Щось змінилося — «Змінити дані».")
 
 
 # ─────────────────────────── Отправка ───────────────────────────
@@ -461,16 +462,16 @@ async def pick_variant(callback: CallbackQuery) -> None:
     product_id = int(callback.data.split(":")[-1])
     product = await queries.get_product_full(product_id)
     if not product or not product["is_active"]:
-        await callback.answer("Товар больше не продаётся", show_alert=True)
+        await callback.answer("Товар більше не продається", show_alert=True)
         return
 
     in_stock = [v for v in product["variants"] if v["stock"] > 0]
     if not in_stock:
-        await callback.answer("Этого товара сейчас нет в наличии", show_alert=True)
+        await callback.answer("Цього товару зараз немає в наявності", show_alert=True)
         return
 
     await callback.message.answer(
-        f"<b>{_esc(product['title'])}</b>\nВыберите вариант:",
+        f"<b>{_esc(product['title'])}</b>\nОберіть варіант:",
         reply_markup=variants_pick_kb(in_stock),
         parse_mode=_HTML,
     )
@@ -484,18 +485,18 @@ async def add_to_cart(callback: CallbackQuery) -> None:
 
     variant = await queries.get_variant(variant_id)
     if not variant or not variant["is_active"]:
-        await callback.answer("Товар больше не продаётся", show_alert=True)
+        await callback.answer("Товар більше не продається", show_alert=True)
         return
 
     status = await queries.add_to_cart(callback.from_user.id, variant_id, 1)
     if status == "out_of_stock":
         await callback.answer(
-            f"В наличии только {variant['stock']} шт — больше положить не получится",
+            f"У наявності лише {variant['stock']} шт — більше покласти не вийде",
             show_alert=True,
         )
         return
     if status != "ok":
-        await callback.answer("Не получилось добавить товар", show_alert=True)
+        await callback.answer("Не вдалося додати товар", show_alert=True)
         return
 
     # Цель для дашборда агентства: положили товар в корзину. Считаем здесь, а
@@ -512,12 +513,12 @@ async def add_to_cart(callback: CallbackQuery) -> None:
 
     cart = await queries.get_cart(callback.from_user.id)
     await callback.message.answer(
-        f"✅ В корзине: {_esc(variant['title'])} — {_esc(variant_label(variant))}\n\n"
-        f"Всего позиций: {cart['count']}, сумма {money(cart['total'])}",
+        f"✅ У кошику: {_esc(variant['title'])} — {_esc(variant_label(variant))}\n\n"
+        f"Усього позицій: {cart['count']}, сума {money(cart['total'])}",
         reply_markup=added_kb(),
         parse_mode=_HTML,
     )
-    await callback.answer("Добавлено в корзину")
+    await callback.answer("Додано в кошик")
 
 
 @router.callback_query(F.data.startswith((f"{CB_INC}:", f"{CB_DEC}:", f"{CB_DEL}:")))
@@ -529,26 +530,26 @@ async def change_qty(callback: CallbackQuery) -> None:
 
     if action == CB_DEL:
         await queries.remove_from_cart(client_id, variant_id)
-        note = "Позиция убрана"
+        note = "Позицію прибрано"
     else:
         cart = await queries.get_cart(client_id)
         current = next(
             (i["qty"] for i in cart["items"] if i["variant_id"] == variant_id), 0
         )
         if not current:
-            await callback.answer("Этой позиции уже нет в корзине")
+            await callback.answer("Цієї позиції вже немає в кошику")
             await show_cart_callback(callback)
             return
 
         new_qty = current + (1 if action == CB_INC else -1)
         status = await queries.set_cart_qty(client_id, variant_id, new_qty)
         if status == "out_of_stock":
-            await callback.answer("Больше на складе нет", show_alert=True)
+            await callback.answer("Більше на складі немає", show_alert=True)
             return
         if status == "not_found":
-            await callback.answer("Товар больше не продаётся", show_alert=True)
+            await callback.answer("Товар більше не продається", show_alert=True)
             return
-        note = "Обновил"
+        note = "Оновив"
 
     cart = await queries.get_cart(client_id)
     await _edit_or_send(
@@ -559,7 +560,7 @@ async def change_qty(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == CB_CLEAR)
 async def clear_ask(callback: CallbackQuery) -> None:
-    await _edit_or_send(callback, "Очистить корзину полностью?", clear_confirm_kb())
+    await _edit_or_send(callback, "Очистити кошик повністю?", clear_confirm_kb())
     await callback.answer()
 
 
@@ -568,7 +569,7 @@ async def clear_confirm(callback: CallbackQuery) -> None:
     await queries.clear_cart(callback.from_user.id)
     cart = await queries.get_cart(callback.from_user.id)
     await _edit_or_send(callback, cart_text(cart))
-    await callback.answer("Корзина пуста")
+    await callback.answer("Кошик порожній")
 
 
 # ─────────────────────── Оформление заказа ───────────────────────
@@ -585,7 +586,7 @@ async def _ask(message: Message, state: FSMContext, field: str) -> None:
         # Нижнюю клавиатуру и inline-кнопки одним сообщением не отправить —
         # шлём двумя: сначала кнопка контакта, следом «Оставить»/«Отменить».
         await message.answer(_PROMPTS[field], reply_markup=phone_kb())
-        await message.answer("Или воспользуйтесь кнопками ниже:", reply_markup=markup)
+        await message.answer("Або скористайтеся кнопками нижче:", reply_markup=markup)
     else:
         await message.answer(_PROMPTS[field], reply_markup=markup)
 
@@ -596,7 +597,7 @@ async def _show_summary(message: Message, state: FSMContext) -> None:
     if not cart["items"]:
         await state.clear()
         await message.answer(
-            "Корзина опустела, пока мы оформляли заказ. Соберите её заново 🙏",
+            "Кошик спорожнів, поки ми оформлювали замовлення. Зберіть його заново 🙏",
             reply_markup=main_menu(),
         )
         return
@@ -663,7 +664,7 @@ async def _start_checkout(message: Message, state: FSMContext, client_id: int,
     cart = await queries.get_cart(client_id)
     if not cart["items"]:
         await message.answer(
-            "Корзина пуста — сначала выберем товар 🙂", reply_markup=main_menu()
+            "Кошик порожній — спершу оберемо товар 🙂", reply_markup=main_menu()
         )
         return
 
@@ -672,7 +673,7 @@ async def _start_checkout(message: Message, state: FSMContext, client_id: int,
     stale = [i for i in cart["items"] if not i["is_active"] or i["stock"] < i["qty"]]
     if stale:
         await message.answer(
-            cart_text(cart) + "\n\n⚠️ Поправьте количество — и оформим заказ.",
+            cart_text(cart) + "\n\n⚠️ Виправте кількість — і оформимо замовлення.",
             reply_markup=cart_kb(cart),
             parse_mode=_HTML,
         )
@@ -710,7 +711,8 @@ async def checkout_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     """Выход из формы. Корзину не трогаем — человек вернётся к ней позже."""
     await state.clear()
     await callback.message.answer(
-        "Оформление отменено. Корзина сохранена — вернуться к ней можно кнопкой ниже.",
+        "Оформлення скасовано. Кошик збережено — повернутися до нього можна "
+        "кнопкою нижче.",
         reply_markup=main_menu(),
     )
     await callback.answer()
@@ -771,7 +773,7 @@ async def step_keep(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     value = (data.get("profile") or {}).get(field, "")
     if not value:
-        await callback.answer("Это значение придётся ввести")
+        await callback.answer("Це значення доведеться ввести")
         return
 
     await callback.answer()
@@ -794,7 +796,7 @@ async def step_phone_contact(message: Message, state: FSMContext) -> None:
     """Номер, отданный самим Telegram, — самый надёжный источник."""
     phone = _clean_phone(message.contact.phone_number) or message.contact.phone_number
     # Убираем клавиатуру с кнопкой контакта: дальше идёт обычный ввод.
-    await message.answer(f"Записал телефон: {phone}", reply_markup=main_menu())
+    await message.answer(f"Записав телефон: {phone}", reply_markup=main_menu())
     await _accept(message, state, "phone", phone)
 
 
@@ -808,29 +810,29 @@ async def step_text(message: Message, state: FSMContext) -> None:
         if _asks_for_section(message.text):
             await state.clear()
             await message.answer(
-                "Оформление отложено, корзина сохранена. Напишите, когда "
-                "будете готовы продолжить 🙂",
+                "Оформлення відкладено, кошик збережено. Напишіть, коли "
+                "будете готові продовжити 🙂",
                 reply_markup=main_menu(),
             )
             return
         await message.answer(
-            "Данные доставки те же — нажмите «Оставить эти данные», и оформлю "
-            "заказ. Что-то поменялось — «Поменять данные»."
+            "Дані доставки ті самі — натисніть «Залишити ці дані», і оформлю "
+            "замовлення. Щось змінилося — «Змінити дані»."
         )
         return
 
     field = _current_field(current)
     if not field:  # состояние confirm — ждём кнопку, а не текст
         await message.answer(
-            "Проверьте заказ выше и нажмите «Всё верно, оформить».",
+            "Перевірте замовлення вище й натисніть «Усе вірно, оформити».",
         )
         return
 
     text = message.text.strip()
     if _asks_for_section(text):
         await message.answer(
-            "Сейчас оформляем заказ. Чтобы выйти — нажмите «Отменить оформление» "
-            "под вопросом выше."
+            "Зараз оформлюємо замовлення. Щоб вийти — натисніть «Скасувати "
+            "оформлення» під питанням вище."
         )
         return
 
@@ -838,24 +840,25 @@ async def step_text(message: Message, state: FSMContext) -> None:
         phone = _clean_phone(text)
         if not phone:
             await message.answer(
-                "Не похоже на номер телефона. Напишите в формате +380XXXXXXXXX "
-                "или нажмите кнопку «Поделиться контактом»."
+                "Не схоже на номер телефона. Напишіть у форматі +380XXXXXXXXX "
+                "або натисніть кнопку «Поділитися контактом»."
             )
             return
-        await message.answer(f"Записал телефон: {phone}", reply_markup=main_menu())
+        await message.answer(f"Записав телефон: {phone}", reply_markup=main_menu())
         await _accept(message, state, "phone", phone)
         return
 
     if field == "email":
         # Отказ словами принимаем наравне с кнопкой: человек в чате отвечает
         # «нет, спасибо», а не ищет глазами, куда нажать.
-        if text.lower() in ("нет", "не надо", "не хочу", "пропустить", "-", "—"):
+        if text.lower() in ("ні", "нет", "не треба", "не надо", "не хочу",
+                            "пропустити", "пропустить", "-", "—"):
             await _accept(message, state, "email", "")
             return
         if not mail.looks_like_email(text):
             await message.answer(
-                "Это не похоже на адрес почты. Напишите так: ivan@example.com — "
-                "или нажмите «Пропустить», почта не обязательна."
+                "Це не схоже на адресу пошти. Напишіть так: ivan@example.com — "
+                "або натисніть «Пропустити», пошта не обов'язкова."
             )
             return
         await _accept(message, state, "email", mail.normalize_email(text))
@@ -863,13 +866,13 @@ async def step_text(message: Message, state: FSMContext) -> None:
 
     low, high = _LIMITS[field]
     if len(text) < low:
-        await message.answer("Слишком коротко — напишите, пожалуйста, подробнее.")
+        await message.answer("Занадто коротко — напишіть, будь ласка, докладніше.")
         return
 
     if field == "np_branch" and not looks_like_branch(text):
         await message.answer(
-            "В отделении Новой Почты должен быть номер. Напишите его цифрой — "
-            "например «12», «№7» или «Поштомат 4521»."
+            "У відділенні Нової Пошти має бути номер. Напишіть його цифрою — "
+            "наприклад «12», «№7» або «Поштомат 4521»."
         )
         return
 
@@ -881,8 +884,8 @@ async def step_text(message: Message, state: FSMContext) -> None:
         await state.update_data(name_attempts=attempts)
         if attempts < _MAX_NAME_ATTEMPTS:
             await message.answer(
-                "Похоже, это не имя 🙂 Курьер будет искать получателя по нему, "
-                "поэтому напишите имя и фамилию — например «Анна Ковальчук»."
+                "Схоже, це не ім'я 🙂 Кур'єр шукатиме одержувача за ним, "
+                "тому напишіть ім'я та прізвище — наприклад «Анна Ковальчук»."
             )
             return
         logger.info("Имя получателя принято без проверки после %s попыток", attempts)
@@ -899,9 +902,9 @@ async def step_photo(message: Message) -> None:
     получает ничего.
     """
     await message.answer(
-        "Сейчас оформляем заказ, поэтому фото я посмотрю чуть позже — ответьте, "
-        "пожалуйста, на вопрос выше. Не хотите продолжать сейчас — нажмите "
-        "«Отменить оформление»."
+        "Зараз оформлюємо замовлення, тому фото я подивлюся трохи пізніше — "
+        "відповідайте, будь ласка, на питання вище. Не хочете продовжувати "
+        "зараз — натисніть «Скасувати оформлення»."
     )
 
 
@@ -932,7 +935,8 @@ async def _place_order(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
     if status == "empty_cart":
         await state.clear()
         await callback.message.answer(
-            "Корзина уже пуста — заказ создавать не из чего.", reply_markup=main_menu()
+            "Кошик уже порожній — замовлення створювати нема з чого.",
+            reply_markup=main_menu(),
         )
         await callback.answer()
         return
@@ -943,8 +947,8 @@ async def _place_order(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
         await state.clear()
         cart = await queries.get_cart(client_id)
         await callback.message.answer(
-            "Пока мы оформляли, товар успели разобрать 😔\n"
-            "Проверьте корзину — что-то придётся заменить или уменьшить.",
+            "Поки ми оформлювали, товар устигли розібрати 😔\n"
+            "Перевірте кошик — щось доведеться замінити або зменшити.",
             reply_markup=main_menu(),
         )
         await callback.message.answer(
@@ -977,7 +981,7 @@ async def _place_order(callback: CallbackQuery, state: FSMContext, bot: Bot) -> 
         "order_created", client_id, order_id=order_id, total=order["total"]
     )
     await callback.message.answer(
-        f"Спасибо! Заказ №{order_id} принят.", reply_markup=main_menu()
+        f"Дякуємо! Замовлення №{order_id} прийнято.", reply_markup=main_menu()
     )
 
     # Провайдер подключён — считаем оплату счётом в Telegram, а не переводом
@@ -1008,19 +1012,19 @@ async def claim_paid(callback: CallbackQuery, bot: Bot) -> None:
     order = await queries.get_order(order_id)
 
     if not order or order["client_id"] != callback.from_user.id:
-        await callback.answer("Заказ не найден", show_alert=True)
+        await callback.answer("Замовлення не знайдено", show_alert=True)
         return
 
     if not await queries.mark_paid_claimed(order_id):
-        human = ORDER_STATUS_RU.get(order["status"], order["status"])
-        await callback.answer(f"Заказ №{order_id}: {human}", show_alert=True)
+        human = ORDER_STATUS_UA.get(order["status"], order["status"])
+        await callback.answer(f"Замовлення №{order_id}: {human}", show_alert=True)
         return
 
     order = await queries.get_order(order_id)
     await _edit_or_send(
         callback,
-        f"Спасибо! Проверяем поступление по заказу №{order_id} и вернёмся с "
-        f"подтверждением 🙌",
+        f"Дякуємо! Перевіряємо надходження за замовленням №{order_id} і "
+        f"повернемось із підтвердженням 🙌",
     )
     await notify_admin_order(bot, order, callback.from_user.username)
     await callback.answer()
@@ -1033,16 +1037,16 @@ async def _orders_view(client_id: int) -> tuple[str, object]:
     """Текст и кнопки списка заказов. Один источник для сообщения и для callback."""
     orders = await queries.get_client_orders(client_id, _MAX_ORDERS_SHOWN)
     if not orders:
-        return "Заказов пока нет. Напишите, что ищете — подберу 🙂", None
+        return "Замовлень поки немає. Напишіть, що шукаєте — підберу 🙂", None
 
-    lines = ["<b>📦 Ваши заказы</b>", ""]
+    lines = ["<b>📦 Ваші замовлення</b>", ""]
     for order in orders:
         lines.append(
-            f"№{order['id']} от {order['created_at'][:10]} — {money(order['total'])}\n"
-            f"    {ORDER_STATUS_RU.get(order['status'], order['status'])}"
+            f"№{order['id']} від {order['created_at'][:10]} — {money(order['total'])}\n"
+            f"    {ORDER_STATUS_UA.get(order['status'], order['status'])}"
         )
         if order["ttn"]:
-            lines.append(f"    Накладная: {_esc(order['ttn'])}")
+            lines.append(f"    Накладна: {_esc(order['ttn'])}")
     return "\n".join(lines), orders_kb(orders)
 
 
@@ -1072,7 +1076,7 @@ async def _client_order(callback: CallbackQuery) -> dict | None:
     order_id = int(callback.data.split(":")[-1])
     order = await queries.get_order(order_id)
     if not order or order["client_id"] != callback.from_user.id:
-        await callback.answer("Заказ не найден", show_alert=True)
+        await callback.answer("Замовлення не знайдено", show_alert=True)
         return None
     return order
 
@@ -1086,19 +1090,19 @@ async def order_cancel_ask(callback: CallbackQuery) -> None:
 
     if not can_client_cancel(order):
         await callback.answer(
-            f"Заказ №{order['id']} уже отменить нельзя — "
-            f"{ORDER_STATUS_RU.get(order['status'], order['status'])}. "
-            f"Напишите нам, разберёмся.",
+            f"Замовлення №{order['id']} скасувати вже не можна — "
+            f"{ORDER_STATUS_UA.get(order['status'], order['status'])}. "
+            f"Напишіть нам, розберемось.",
             show_alert=True,
         )
         return
 
     await _edit_or_send(
         callback,
-        f"Отменить заказ №{order['id']} на {money(order['total'])}?\n\n"
+        f"Скасувати замовлення №{order['id']} на {money(order['total'])}?\n\n"
         f"{order_items_text(order)}\n\n"
-        f"Товар вернётся на витрину, а заказ — восстановить не получится: "
-        f"если передумаете, оформим заново.",
+        f"Товар повернеться на вітрину, а замовлення відновити не вийде: "
+        f"якщо передумаєте, оформимо заново.",
         order_cancel_confirm_kb(order["id"]),
     )
     await callback.answer()
@@ -1117,22 +1121,22 @@ async def order_cancel_do(callback: CallbackQuery, bot: Bot) -> None:
 
     if not can_client_cancel(order):
         await callback.answer(
-            f"Заказ №{order['id']} уже отменить нельзя — "
-            f"{ORDER_STATUS_RU.get(order['status'], order['status'])}.",
+            f"Замовлення №{order['id']} скасувати вже не можна — "
+            f"{ORDER_STATUS_UA.get(order['status'], order['status'])}.",
             show_alert=True,
         )
         return
 
     if not await queries.cancel_order(order["id"], note="Отменён покупателем"):
-        await callback.answer("Заказ уже отменён", show_alert=True)
+        await callback.answer("Замовлення вже скасовано", show_alert=True)
         return
 
     await _edit_or_send(
         callback,
-        f"Заказ №{order['id']} отменён, товар вернулся на витрину.\n\n"
-        f"Будет нужно — соберём новый заказ 🙂",
+        f"Замовлення №{order['id']} скасовано, товар повернувся на вітрину.\n\n"
+        f"Буде потрібно — зберемо нове замовлення 🙂",
     )
-    await callback.answer("Заказ отменён")
+    await callback.answer("Замовлення скасовано")
     await _notify_admin_cancelled(bot, order, callback.from_user.username)
 
 

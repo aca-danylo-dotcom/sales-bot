@@ -36,7 +36,7 @@ def categories_kb(categories: list[str]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for index, name in enumerate(categories):
         kb.button(text=name, callback_data=f"{CB_PAGE}:{index}:0")
-    kb.button(text="📋 Всё подряд", callback_data=f"{CB_PAGE}:{ALL_CATEGORIES}:0")
+    kb.button(text="📋 Усе поспіль", callback_data=f"{CB_PAGE}:{ALL_CATEGORIES}:0")
     kb.adjust(2)
     return kb.as_markup()
 
@@ -49,5 +49,5 @@ def more_kb(*, category_index: int, page: int) -> InlineKeyboardMarkup:
     всегда.
     """
     kb = InlineKeyboardBuilder()
-    kb.button(text="Показать ещё", callback_data=f"{CB_PAGE}:{category_index}:{page}")
+    kb.button(text="Показати ще", callback_data=f"{CB_PAGE}:{category_index}:{page}")
     return kb.as_markup()

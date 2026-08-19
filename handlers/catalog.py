@@ -97,8 +97,8 @@ async def _categories_view() -> tuple[str, object | None]:
     """Текст и кнопки первого экрана каталога."""
     categories = await queries.get_categories()
     if not categories and not await queries.count_products(status="active"):
-        return "Каталог пока пуст — товары вот-вот появятся.", None
-    return "Выберите, что посмотреть:", categories_kb(categories)
+        return "Каталог поки порожній — товари ось-ось з'являться.", None
+    return "Оберіть, що подивитися:", categories_kb(categories)
 
 
 async def _show_category(callback: CallbackQuery, category_index: int, page: int) -> None:
@@ -117,7 +117,7 @@ async def _show_category(callback: CallbackQuery, category_index: int, page: int
     if category_index != ALL_CATEGORIES:
         categories = await queries.get_categories()
         if not 0 <= category_index < len(categories):
-            await _replace(callback, "Каталог обновился — выберите заново:",
+            await _replace(callback, "Каталог оновився — оберіть заново:",
                            categories_kb(categories))
             return
         category = categories[category_index]
@@ -128,10 +128,10 @@ async def _show_category(callback: CallbackQuery, category_index: int, page: int
         limit=PAGE_SIZE, offset=page * PAGE_SIZE,
     )
     if not products:
-        where = f"В категории «{html.escape(category)}»" if category else "В каталоге"
+        where = f"У категорії «{html.escape(category)}»" if category else "У каталозі"
         await callback.message.answer(
-            f"{where} сейчас всё разобрали. Загляните в другую категорию — "
-            f"или напишите, что ищете, и я поищу под заказ.",
+            f"{where} зараз усе розібрали. Загляньте в іншу категорію — "
+            f"або напишіть, що шукаєте, і я пошукаю під замовлення.",
             reply_markup=categories_kb(await queries.get_categories()),
         )
         return
@@ -147,7 +147,7 @@ async def _show_category(callback: CallbackQuery, category_index: int, page: int
     shown = page * PAGE_SIZE + len(products)
     if shown < total:
         await callback.message.answer(
-            f"Показал {shown} из {total}.",
+            f"Показав {shown} з {total}.",
             reply_markup=more_kb(category_index=category_index, page=page + 1),
         )
 
@@ -201,7 +201,7 @@ async def show_item(callback: CallbackQuery) -> None:
     product_id = int(callback.data.split(":")[2])
     product = await queries.get_product_full(product_id)
     if not product or not product["is_active"]:
-        await callback.answer("Этого товара уже нет в продаже", show_alert=True)
+        await callback.answer("Цього товару вже немає в продажу", show_alert=True)
         return
 
     # Карточку шлём новым сообщением, а список оставляем на месте: клиент

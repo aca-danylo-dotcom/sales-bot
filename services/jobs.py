@@ -80,9 +80,10 @@ async def cancel_expired_orders(bot: Bot) -> int:
         try:
             await bot.send_message(
                 order["client_id"],
-                f"Заказ №{order['id']} на {money(order['total'])} мы отменили — "
-                f"оплата так и не пришла, а товар держать дольше не можем.\n\n"
-                f"Если всё ещё нужен — напишите, соберём заказ заново 🙂",
+                f"Замовлення №{order['id']} на {money(order['total'])} ми "
+                f"скасували — оплата так і не надійшла, а товар тримати довше не "
+                f"можемо.\n\n"
+                f"Якщо все ще потрібен — напишіть, зберемо замовлення заново 🙂",
             )
         except Exception:
             # Бот заблокирован или чат удалён. Заказ уже отменён и остатки
@@ -146,7 +147,7 @@ async def remind_abandoned_carts(bot: Bot) -> int:
         except Exception:
             logger.warning("Не удалось напомнить клиенту %s о корзине", client_id)
 
-        await outreach.send_email_copy(client, "Ваша корзина в магазине ждёт", text)
+        await outreach.send_email_copy(client, "Ваш кошик у магазині чекає", text)
 
     if sent:
         logger.info("Отправлено напоминаний о брошенной корзине: %s", sent)
@@ -191,7 +192,8 @@ async def win_back_sleeping_clients(bot: Bot) -> int:
             # стоит, значит второй раз мы к нему не придём.
             logger.warning("Не удалось написать клиенту %s", client_id)
 
-        await outreach.send_email_copy(client, f"{config.SHOP_NAME}: давно вас не было", text)
+        await outreach.send_email_copy(
+            client, f"{config.SHOP_NAME}: давно вас не було", text)
 
     if sent:
         logger.info("Отправлено напоминаний «давно не заходили»: %s", sent)

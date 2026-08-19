@@ -73,16 +73,16 @@ def cart_kb(cart: dict) -> InlineKeyboardMarkup:
         kb.button(text="🗑", callback_data=f"{CB_DEL}:{variant_id}")
         rows.append(4)
 
-    kb.button(text="✅ Оформить заказ", callback_data=CB_CHECKOUT)
-    kb.button(text="🧹 Очистить корзину", callback_data=CB_CLEAR)
+    kb.button(text="✅ Оформити замовлення", callback_data=CB_CHECKOUT)
+    kb.button(text="🧹 Очистити кошик", callback_data=CB_CLEAR)
     kb.adjust(*rows, 1, 1)
     return kb.as_markup()
 
 
 def clear_confirm_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🧹 Да, очистить", callback_data=CB_CLEAR_OK)
-    kb.button(text="Отмена", callback_data=CB_CART)
+    kb.button(text="🧹 Так, очистити", callback_data=CB_CLEAR_OK)
+    kb.button(text="Скасувати", callback_data=CB_CART)
     kb.adjust(1)
     return kb.as_markup()
 
@@ -90,8 +90,8 @@ def clear_confirm_kb() -> InlineKeyboardMarkup:
 def added_kb() -> InlineKeyboardMarkup:
     """После добавления товара: сразу в корзину или сразу оформлять."""
     kb = InlineKeyboardBuilder()
-    kb.button(text="🧺 Корзина", callback_data=CB_CART)
-    kb.button(text="✅ Оформить заказ", callback_data=CB_CHECKOUT)
+    kb.button(text="🧺 Кошик", callback_data=CB_CART)
+    kb.button(text="✅ Оформити замовлення", callback_data=CB_CHECKOUT)
     kb.adjust(2)
     return kb.as_markup()
 
@@ -108,10 +108,10 @@ def product_card_kb(product: dict) -> InlineKeyboardMarkup | None:
 
     kb = InlineKeyboardBuilder()
     if len(in_stock) == 1:
-        kb.button(text="🛒 В корзину", callback_data=f"{CB_ADD}:{in_stock[0]['id']}")
+        kb.button(text="🛒 У кошик", callback_data=f"{CB_ADD}:{in_stock[0]['id']}")
     else:
-        kb.button(text="🛒 В корзину", callback_data=f"{CB_PICK}:{product['id']}")
-    kb.button(text="🧺 Корзина", callback_data=CB_CART)
+        kb.button(text="🛒 У кошик", callback_data=f"{CB_PICK}:{product['id']}")
+    kb.button(text="🧺 Кошик", callback_data=CB_CART)
     kb.adjust(2)
     return kb.as_markup()
 
@@ -137,10 +137,10 @@ def step_kb(keep: str | None = None, *, skip: bool = False) -> InlineKeyboardMar
     kb = InlineKeyboardBuilder()
     if keep:
         shown = keep if len(keep) <= 30 else keep[:29] + "…"
-        kb.button(text=f"✅ Оставить: {shown}", callback_data=CB_KEEP)
+        kb.button(text=f"✅ Залишити: {shown}", callback_data=CB_KEEP)
     if skip:
-        kb.button(text="Пропустить", callback_data=CB_SKIP)
-    kb.button(text="❌ Отменить оформление", callback_data=CB_CANCEL)
+        kb.button(text="Пропустити", callback_data=CB_SKIP)
+    kb.button(text="❌ Скасувати оформлення", callback_data=CB_CANCEL)
     kb.adjust(1)
     return kb.as_markup()
 
@@ -154,8 +154,8 @@ def saved_data_kb() -> InlineKeyboardMarkup:
     подтверждает по очереди то, что и так не менялось.
     """
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Оставить эти данные", callback_data=CB_KEEP_ALL)
-    kb.button(text="✏️ Поменять данные", callback_data=CB_RESTART)
+    kb.button(text="✅ Залишити ці дані", callback_data=CB_KEEP_ALL)
+    kb.button(text="✏️ Змінити дані", callback_data=CB_RESTART)
     kb.adjust(1)
     return kb.as_markup()
 
@@ -167,26 +167,26 @@ def phone_kb() -> ReplyKeyboardMarkup:
     следующем шаге клиент вводит город текстом.
     """
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📱 Поделиться контактом", request_contact=True)]],
+        keyboard=[[KeyboardButton(text="📱 Поділитися контактом", request_contact=True)]],
         resize_keyboard=True,
         one_time_keyboard=True,
-        input_field_placeholder="Или напишите номер вручную",
+        input_field_placeholder="Або напишіть номер вручну",
     )
 
 
 def summary_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Всё верно, оформить", callback_data=CB_CONFIRM)
-    kb.button(text="✏️ Ввести данные заново", callback_data=CB_RESTART)
-    kb.button(text="❌ Отменить", callback_data=CB_CANCEL)
+    kb.button(text="✅ Усе вірно, оформити", callback_data=CB_CONFIRM)
+    kb.button(text="✏️ Ввести дані заново", callback_data=CB_RESTART)
+    kb.button(text="❌ Скасувати", callback_data=CB_CANCEL)
     kb.adjust(1)
     return kb.as_markup()
 
 
 def payment_kb(order_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="💳 Я оплатил", callback_data=f"{CB_PAID}:{order_id}")
-    kb.button(text="❌ Отменить заказ", callback_data=f"{CB_ORD_CANCEL}:{order_id}")
+    kb.button(text="💳 Я оплатив", callback_data=f"{CB_PAID}:{order_id}")
+    kb.button(text="❌ Скасувати замовлення", callback_data=f"{CB_ORD_CANCEL}:{order_id}")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -194,9 +194,9 @@ def payment_kb(order_id: int) -> InlineKeyboardMarkup:
 def order_cancel_confirm_kb(order_id: int) -> InlineKeyboardMarkup:
     """Переспрос перед отменой: тап по «Отменить» бывает случайным."""
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Да, отменить заказ",
+    kb.button(text="❌ Так, скасувати замовлення",
               callback_data=f"{CB_ORD_CANCEL_OK}:{order_id}")
-    kb.button(text="Нет, оставить", callback_data=CB_ORDERS)
+    kb.button(text="Ні, залишити", callback_data=CB_ORDERS)
     kb.adjust(1)
     return kb.as_markup()
 
@@ -216,12 +216,12 @@ def orders_kb(orders: list[dict]) -> InlineKeyboardMarkup | None:
     kb = InlineKeyboardBuilder()
     for order in waiting:
         kb.button(
-            text=f"💳 Оплатил заказ №{order['id']} — {money(order['total'])}",
+            text=f"💳 Оплатив замовлення №{order['id']} — {money(order['total'])}",
             callback_data=f"{CB_PAID}:{order['id']}",
         )
     for order in cancellable:
         kb.button(
-            text=f"❌ Отменить заказ №{order['id']}",
+            text=f"❌ Скасувати замовлення №{order['id']}",
             callback_data=f"{CB_ORD_CANCEL}:{order['id']}",
         )
     kb.adjust(1)

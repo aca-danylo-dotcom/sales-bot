@@ -25,7 +25,7 @@ import config
 from db import queries
 from keyboards.menus import main_menu
 from services import payments
-from services.format import ORDER_STATUS_RU, money
+from services.format import ORDER_STATUS_UA, money
 
 logger = logging.getLogger(__name__)
 
@@ -53,21 +53,21 @@ async def confirm_checkout(query: PreCheckoutQuery) -> None:
     """
     order_id = payments.order_id_from_payload(query.invoice_payload)
     if order_id is None:
-        await query.answer(ok=False, error_message="Счёт устарел. Оформите заказ заново.")
+        await query.answer(ok=False, error_message="Рахунок застарів. Оформіть замовлення заново.")
         return
 
     order = await queries.get_order(order_id)
     if not order or order["client_id"] != query.from_user.id:
-        await query.answer(ok=False, error_message="Заказ не найден.")
+        await query.answer(ok=False, error_message="Замовлення не знайдено.")
         return
 
     if order["status"] not in _PAYABLE:
         # Статус подставляем через двоеточие, а не в середину фразы: в словаре
         # лежат целые формулировки («оплата подтверждена, готовим к отправке»),
         # и «заказ уже оплата подтверждена» читалось бы как оговорка.
-        human = ORDER_STATUS_RU.get(order["status"], order["status"])
+        human = ORDER_STATUS_UA.get(order["status"], order["status"])
         await query.answer(
-            ok=False, error_message=f"Заказ №{order_id}: {human}."
+            ok=False, error_message=f"Замовлення №{order_id}: {human}."
         )
         return
 
@@ -78,7 +78,7 @@ async def confirm_checkout(query: PreCheckoutQuery) -> None:
         )
         await query.answer(
             ok=False,
-            error_message="Сумма заказа изменилась. Откройте заказ и оплатите заново.",
+            error_message="Сума замовлення змінилася. Відкрийте замовлення й оплатіть заново.",
         )
         return
 
@@ -103,7 +103,7 @@ async def payment_received(message: Message, bot: Bot) -> None:
             payment.invoice_payload, message.from_user.id, payment.total_amount,
         )
         await message.answer(
-            "Оплата прошла, но заказ по ней не нашёлся. Напишите нам — разберёмся."
+            "Оплата пройшла, але замовлення за нею не знайшлося. Напишіть нам — розберемось."
         )
         return
 
@@ -119,7 +119,7 @@ async def payment_received(message: Message, bot: Bot) -> None:
         # Повторный апдейт по уже подтверждённому заказу. Клиенту отвечаем
         # спокойно: для него это тот же самый платёж, а не второй.
         logger.info("Повторное подтверждение оплаты заказа №%s", order_id)
-        await message.answer(f"Заказ №{order_id} уже оплачен и в работе.")
+        await message.answer(f"Замовлення №{order_id} вже оплачено і в роботі.")
         return
 
     logger.info(
@@ -129,9 +129,9 @@ async def payment_received(message: Message, bot: Bot) -> None:
     )
 
     await message.answer(
-        f"Оплата прошла ✅\n\n"
-        f"Заказ №{order_id} на {money(order['total'])} подтверждён — собираем "
-        f"посылку. Номер накладной пришлём сюда, как только отправим.",
+        f"Оплата пройшла ✅\n\n"
+        f"Замовлення №{order_id} на {money(order['total'])} підтверджено — збираємо "
+        f"посилку. Номер накладної надішлемо сюди, щойно відправимо.",
         reply_markup=main_menu(),
     )
     await _notify_admin(bot, order, message.from_user.username)

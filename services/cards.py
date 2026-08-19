@@ -33,13 +33,13 @@ def card_caption(product: dict) -> str:
 
     in_stock = [v for v in product["variants"] if v["stock"] > 0]
     if in_stock:
-        lines += ["", "В наличии:"]
+        lines += ["", "У наявності:"]
         for variant in in_stock[:10]:
             lines.append(f"{html.escape(variant_label(variant))} — {variant['stock']} шт.")
         if len(in_stock) > 10:
-            lines.append(f"…и ещё {len(in_stock) - 10}")
+            lines.append(f"…і ще {len(in_stock) - 10}")
     else:
-        lines += ["", "Сейчас нет в наличии."]
+        lines += ["", "Зараз немає в наявності."]
 
     caption = "\n".join(lines)
     return caption if len(caption) <= MAX_CAPTION else caption[:MAX_CAPTION - 1] + "…"

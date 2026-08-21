@@ -277,6 +277,11 @@ _ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("product_photos", "content_hash", "TEXT"),
     ("clients", "email", "TEXT"),
     ("clients", "outreach_at", "TEXT"),
+    # Метка «этот человек пришёл по ссылке с портфолио». Ставится один раз, при
+    # /start с параметром, и нужна ровно для одного: показать гостю ЕГО
+    # собственный заказ в демо-панели на сайте. Чужие заказы по ней не
+    # достаются — токен у каждого посетителя свой и живёт в его браузере.
+    ("clients", "demo_token", "TEXT"),
     # NOT NULL здесь поставить нельзя (см. правило выше), поэтому скидка в старых
     # заказах будет NULL — везде, где её читают, стоит COALESCE(discount, 0).
     ("orders", "discount", "REAL DEFAULT 0"),
@@ -295,6 +300,8 @@ _ADDED_INDEXES: list[str] = [
     # По нему сводка «закончилось на складе» проверяет, продавался ли размер
     # раньше: без индекса каждый нулевой размер перебирал бы все позиции заказов.
     "CREATE INDEX IF NOT EXISTS idx_order_items_variant ON order_items(variant_id)",
+    # По нему демо-панель на сайте находит заказы своего гостя.
+    "CREATE INDEX IF NOT EXISTS idx_clients_demo ON clients(demo_token)",
 ]
 
 

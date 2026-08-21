@@ -510,6 +510,14 @@ def _history_to_conversation(rows: list[dict]) -> list[ConvMessage]:
     return conv
 
 
+# Приставка у метки из портфолио: ссылка выглядит как
+# t.me/бот?start=demo_<токен>. Приставка нужна, чтобы отличить её от любых
+# других параметров, которые появятся у /start позже.
+DEMO_PREFIX = "demo_"
+# Длина токена ограничена: он приходит снаружи и идёт в базу.
+DEMO_TOKEN_MAX = 64
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     """Знакомство: заводим клиента и показываем главное меню.
@@ -518,6 +526,15 @@ async def cmd_start(message: Message) -> None:
     у покупателя — обычное дело.
     """
     await queries.ensure_client(message.from_user.id)
+
+    # Гость с портфолио: пришёл по ссылке из демо и должен увидеть свой заказ
+    # в панели прямо на сайте. Метку ставим один раз (см. set_demo_token) —
+    # постоянного покупателя чужая ссылка перевесить на себя не может.
+    payload = (message.text or "").partition(" ")[2].strip()
+    if payload.startswith(DEMO_PREFIX):
+        token = payload[len(DEMO_PREFIX):][:DEMO_TOKEN_MAX]
+        if token.replace("-", "").isalnum():
+            await queries.set_demo_token(message.from_user.id, token)
     # Про витрину говорим прямо в приветствии, и только если она выложена.
     # Кнопка «Магазин» стоит слева от поля ввода — место заметное, но привычки
     # смотреть туда у людей нет, и без слов её попросту не находят.

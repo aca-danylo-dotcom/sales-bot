@@ -19,7 +19,16 @@ from __future__ import annotations
 
 from aiohttp import web
 
-from web.api import notifications, orders, products, session, shop, stats, summary
+from web.api import (
+    demo,
+    notifications,
+    orders,
+    products,
+    session,
+    shop,
+    stats,
+    summary,
+)
 
 
 def setup_routes(app: web.Application) -> None:
@@ -31,6 +40,9 @@ def setup_routes(app: web.Application) -> None:
     products.setup_routes(app)
     notifications.setup_routes(app)
     stats.setup_routes(app)
+    # Заказы гостя демо для сайта-портфолио. Открыт без пароля, но отдаёт
+    # заказы ровно одного человека — того, чья метка передана (см. demo.py).
+    demo.setup_routes(app)
     # Магазин для покупателя. Свой префикс /api/shop/ — по нему web/auth.py и
     # отличает витрину от панели: у них разные правила доступа.
     shop.setup_routes(app)

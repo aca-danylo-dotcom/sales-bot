@@ -35,6 +35,72 @@ async def ensure_client(telegram_id: int) -> None:
         await conn.commit()
 
 
+async def set_demo_token(telegram_id: int, token: str) -> None:
+    """Отмечает, что человек пришёл по ссылке с портфолио.
+
+    Ставится один раз и больше не меняется: если гость уже покупал через бота
+    раньше, перевешивать его на чужую демо-панель нельзя — иначе владелец
+    ссылки увидел бы заказы постороннего человека.
+    """
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE clients SET demo_token = ? "
+            "WHERE telegram_id = ? AND (demo_token IS NULL OR demo_token = '')",
+            (token, telegram_id),
+        )
+        await conn.commit()
+
+
+async def orders_by_demo_token(token: str, limit: int = 20) -> list[dict]:
+    """Заказы одного гостя демо — по его метке, и только его.
+
+    Состав заказа отдаём строкой: панель на сайте показывает её как есть, а
+    лезть за товарами вторым запросом на каждый заказ незачем.
+    """
+    if not token:
+        return []
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT orders.id, orders.status, orders.total, orders.name,
+                      orders.phone, orders.city, orders.np_branch, orders.ttn,
+                      orders.comment, orders.created_at, orders.paid_at,
+                      orders.confirmed_at, orders.shipped_at,
+                      COALESCE((SELECT SUM(qty) FROM order_items oi
+                                WHERE oi.order_id = orders.id), 0) AS units_count,
+                      COALESCE((SELECT GROUP_CONCAT(
+                                    TRIM(oi.title_snapshot || ' ' ||
+                                         oi.size || ' ' || oi.color),
+                                    ', ')
+                                FROM order_items oi
+                                WHERE oi.order_id = orders.id), '') AS items_text
+               FROM orders
+               JOIN clients ON clients.telegram_id = orders.client_id
+               WHERE clients.demo_token = ?
+               ORDER BY orders.id DESC LIMIT ?""",
+            (token, limit),
+        )
+        return _rows(await cursor.fetchall())
+
+
+async def demo_order_items(order_id: int) -> list[dict]:
+    """Позиции заказа для демо-панели на сайте: что купили и в каком варианте.
+
+    Товар берём через вариант, чтобы панель могла показать его фото: снимки у
+    неё те же, что в каталоге бота, и находит она их по номеру товара.
+    """
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT oi.title_snapshot, oi.size, oi.color, oi.qty,
+                      oi.price_snapshot, v.product_id
+               FROM order_items oi
+               LEFT JOIN product_variants v ON v.id = oi.variant_id
+               WHERE oi.order_id = ?
+               ORDER BY oi.id""",
+            (order_id,),
+        )
+        return _rows(await cursor.fetchall())
+
+
 async def get_client(telegram_id: int) -> dict | None:
     """Клиент по telegram_id или None."""
     async with get_connection() as conn:
